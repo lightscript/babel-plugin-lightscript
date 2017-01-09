@@ -1,0 +1,2 @@
+fn() =*>
+  yield this
