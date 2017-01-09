@@ -4,7 +4,7 @@
   "description": "WIP, probably to be replaced by many smaller plugins",
   "main": "lib/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node node_modules/.bin/mocha test",
     "build": "babel src --out-dir lib"
   },
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
@@ -19,5 +19,9 @@
     "eslint-config-babel": "^3.0.0",
     "eslint-plugin-babel": "^4.0.0",
     "eslint-plugin-flowtype": "^2.4.0"
+  },
+  "devDependencies": {
+    "babel-helper-plugin-test-runner": "^6.18.0",
+    "mocha": "^3.2.0"
   }
 }
