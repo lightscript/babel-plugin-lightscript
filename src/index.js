@@ -249,6 +249,13 @@ export default function (babel) {
     }
   }
 
+  function blockToExpression(path, key) {
+    if (t.isBlockStatement(path.node[key])) {
+      path.get(key).canSwapBetweenExpressionAndStatement = () => true;
+      path.get(key).replaceExpressionWithStatements(path.node[key].body);
+    }
+  }
+
 
   // TYPE DEFINITIONS
 
@@ -415,6 +422,24 @@ export default function (babel) {
       },
     },
   });
+
+  reallyDefineType("IfExpression", {
+    visitor: ["test", "consequent", "alternate"],
+    aliases: ["Expression", "Conditional"],
+    fields: {
+      test: {
+        validate: t.assertNodeType("Expression")
+      },
+      consequent: {
+        validate: t.assertNodeType("Expression", "BlockStatement")
+      },
+      alternate: {
+        optional: true,
+        validate: t.assertNodeType("Expression", "BlockStatement")
+      }
+    }
+  });
+
 
   return {
     manipulateOptions(opts, parserOpts) {
@@ -614,6 +639,17 @@ export default function (babel) {
         }
       },
 
+      IfExpression(path) {
+        blockToExpression(path, "consequent");
+
+        if (path.node.alternate) {
+          blockToExpression(path, "alternate");
+        } else {
+          path.get("alternate").replaceWith(t.nullLiteral());
+        }
+
+        path.replaceWith(t.conditionalExpression(path.node.test, path.node.consequent, path.node.alternate));
+      },
 
     },
   };
