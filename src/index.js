@@ -92,6 +92,25 @@ export default function (babel) {
     },
   });
 
+  reallyDefineType("TildeCallExpression", {
+    visitor: ["left", "right", "arguments"],
+    aliases: ["CallExpression", "Expression"],
+    fields: {
+      left: {
+        validate: t.assertNodeType("Expression"),
+      },
+      right: {
+        validate: t.assertOneOf("Identifier", "MemberExpression"),
+      },
+      arguments: {
+        validate: t.chain(
+          t.assertValueType("array"),
+          t.assertEach(t.assertNodeType("Expression", "SpreadElement"))
+        ),
+      },
+    },
+  });
+
 
   return {
     manipulateOptions(opts, parserOpts) {
@@ -181,6 +200,14 @@ export default function (babel) {
         ]));
         const iife = t.callExpression(fn, []);
         path.replaceWith(iife);
+      },
+
+      TildeCallExpression(path) {
+        const callExpr = t.callExpression(path.node.right, [
+          path.node.left,
+          ...path.node.arguments,
+        ]);
+        path.replaceWith(callExpr);
       },
 
 
