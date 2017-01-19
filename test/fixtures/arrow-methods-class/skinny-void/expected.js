@@ -1,6 +1,6 @@
 class A {
-  f() {
+  f(): void {
     1;
-    return 2;
+    2;
   }
 }

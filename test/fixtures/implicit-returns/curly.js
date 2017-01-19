@@ -1,2 +1,2 @@
 fn(x) -> { 1 }
-assert.equal(fn(), undefined)
+assert.equal(fn(), 1)

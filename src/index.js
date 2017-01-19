@@ -57,7 +57,8 @@ export default function (babel) {
     } else {
       fn = t.functionExpression(id, params, body, generator, async);
     }
-    fn.white = node.white;
+    if (node.returnType) fn.returnType = node.returnType;
+    if (node.typeParameters) fn.typeParameters = node.typeParameters;
     return fn;
   }
 
@@ -66,13 +67,15 @@ export default function (babel) {
 
     if (t.isStatement(node)) {
       let fn = t.arrowFunctionExpression(params, body, async);
-      fn.white = node.white;
+      if (node.returnType) fn.returnType = node.returnType;
+      if (node.typeParameters) fn.typeParameters = node.typeParameters;
       return t.variableDeclaration("const", [t.variableDeclarator(id, fn)]);
     } else {
       // just throw away the id for now...
       // TODO: think of a way to use it? or outlaw named fat-arrow expressions?
       let fn = t.arrowFunctionExpression(params, body, async);
-      fn.white = node.white;
+      if (node.returnType) fn.returnType = node.returnType;
+      if (node.typeParameters) fn.typeParameters = node.typeParameters;
       return fn;
     }
   }
@@ -97,7 +100,7 @@ export default function (babel) {
   }
 
   function isNamedArrowFunction(node) {
-    return (typeof node.white === "boolean");
+    return (typeof node.skinny === "boolean");
   }
 
   // c/p from replaceExpressionWithStatements
@@ -146,13 +149,13 @@ export default function (babel) {
     if (!constructorPath) {
       let emptyConstructor = t.classMethod("constructor", t.identifier("constructor"),
         [], t.blockStatement([]));
-      emptyConstructor.white = true; // mark for super insertion
+      emptyConstructor.skinny = true; // mark for super insertion
       path.get("body").unshiftContainer("body", emptyConstructor);
       constructorPath = path.get("body.body.0.body");
     }
 
     // add super if it wasn't there (unless defined with curly braces)
-    if (node.superClass && constructorPath.parentPath.node.white && !containsSuperCall(constructorPath)) {
+    if (node.superClass && constructorPath.parentPath.node.skinny && !containsSuperCall(constructorPath)) {
       let superCall;
       if (constructorPath.parentPath.node.params.length) {
         superCall = t.expressionStatement(t.callExpression(t.super(), [t.identifier("arguments")]));
@@ -332,7 +335,7 @@ export default function (babel) {
   });
 
   reallyDefineType("NamedArrowDeclaration", {
-    builder: ["id", "params", "body", "skinny", "white", "async", "generator"],
+    builder: ["id", "params", "body", "skinny", "async", "generator"],
     visitor: ["id", "params", "body", "returnType", "typeParameters"],
     aliases: [
       "Scopable",
@@ -359,9 +362,6 @@ export default function (babel) {
         validate: t.assertNodeType("BlockStatement", "Expression"),
       },
       skinny: {
-        validate: t.assertValueType("boolean")
-      },
-      white: {
         validate: t.assertValueType("boolean")
       },
       generator: {
@@ -409,9 +409,6 @@ export default function (babel) {
       skinny: {
         validate: t.assertValueType("boolean")
       },
-      white: {
-        validate: t.assertValueType("boolean")
-      },
       generator: {
         default: false,
         validate: t.assertValueType("boolean")
@@ -446,6 +443,8 @@ export default function (babel) {
       opts.parserOpts = opts.parserOpts || {};
       opts.parserOpts.parser = parse;
       parserOpts.plugins.unshift("lightscript");
+      // TODO: allow configuration options to disable these, as they slow down parsing
+      parserOpts.plugins.push("jsx", "flow");
     },
 
     visitor: {
@@ -593,10 +592,10 @@ export default function (babel) {
             constructorPath = path.get(`body.${i}.body`);
           } else if (method.static && method.skinny === false) {
             fatStaticArrows.push(method.key);
-            delete method.skinny;
+            method.skinny = true; // prevent infinite recursion
           } else if (method.skinny === false) {
             fatArrows.push(method.key);
-            delete method.skinny;
+            method.skinny = true; // prevent infinite recursion
           }
         });
 
@@ -614,15 +613,13 @@ export default function (babel) {
         }
       },
 
-      // TODO: cleanup, dedup, decide
-
       ObjectExpression(path) {
         let fatArrows = [];
         path.node.properties.forEach((prop) => {
           if (t.isMethod(prop) && prop.skinny === false) {
             fatArrows.push(prop.key);
             // bit ugly, but need a way to ensure we don't double-recurse...
-            delete prop.skinny;
+            prop.skinny = true;
           }
         });
 
@@ -634,7 +631,10 @@ export default function (babel) {
       Function(path) {
         if (path.node.kind === "constructor" || path.node.kind === "set") return;
 
-        if (path.node.white) {
+        const isVoid = path.node.returnType &&
+          t.isVoidTypeAnnotation(path.node.returnType.typeAnnotation);
+
+        if (!isVoid) {
           addImplicitReturns(path);
         }
       },

@@ -1,6 +1,6 @@
 const o = {
-  f() {
+  f(): void {
     1;
-    return 2;
+    2;
   }
 };

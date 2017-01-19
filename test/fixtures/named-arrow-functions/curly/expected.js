@@ -1,4 +1,4 @@
 function fn() {
   1;
-  2;
+  return 2;
 }

@@ -1,4 +1,4 @@
 function* fn() {
   yield 1;
-  yield 2;
+  return yield 2;
 }
