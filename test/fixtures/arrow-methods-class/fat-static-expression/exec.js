@@ -1,5 +1,5 @@
 x(klass) ->
-  f = klass.f
+  f := klass.f
   f()
 
 name := x(

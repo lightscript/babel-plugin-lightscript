@@ -1,1 +1,1 @@
-x = true ? 1 : null;
+const x = true ? 1 : null;

@@ -1,4 +1,4 @@
-x = true ? (1, 1) : true ? function () {
+const x = true ? (1, 1) : true ? function () {
   var _ret;
 
   for (const x of []) {

@@ -1,4 +1,6 @@
-function* (): void {
+for (const x of function* (): void {
   yield 1;
   yield 2;
-}.bind(this)
+}.bind(this)) {
+  console.log(x);
+}

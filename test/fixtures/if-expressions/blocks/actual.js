@@ -1,4 +1,4 @@
-x = if true:
+x := if true:
   1
   1
 elif true:

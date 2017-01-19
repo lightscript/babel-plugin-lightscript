@@ -51,15 +51,17 @@ export default function (babel) {
 
     body = toBlockStatement(body);
 
-    let fn;
-    if (t.isStatement(node)) {
-      fn = t.functionDeclaration(id, params, body, generator, async);
-    } else {
-      fn = t.functionExpression(id, params, body, generator, async);
-    }
+    const fn = t.isStatement(node)
+      ? t.functionDeclaration(id, params, body, generator, async)
+      : t.functionExpression(id, params, body, generator, async);
+
     if (node.returnType) fn.returnType = node.returnType;
     if (node.typeParameters) fn.typeParameters = node.typeParameters;
     return fn;
+  }
+
+  function replaceWithPlainFunction(path) {
+    path.replaceWith(toPlainFunction(path.node));
   }
 
   function toArrowFunction(node) {
@@ -80,22 +82,35 @@ export default function (babel) {
     }
   }
 
-  function toBoundFunction(node) {
-    let unbound = toPlainFunction(node);
+  function replaceWithArrowFunction(path) {
+    const id = path.get("id");
+    path.replaceWith(toArrowFunction(path.node));
+    path.scope.registerBinding("const", id);
+  }
 
-    if (t.isStatement(node)) {
-      let bound = t.callExpression(
-        t.memberExpression(node.id, t.identifier("bind")),
+  function replaceWithBoundFunction(path) {
+    const isStatement = t.isStatement(path.node);
+
+    if (isStatement) {
+      replaceWithPlainFunction(path);
+
+      const bound = t.callExpression(
+        t.memberExpression(path.node.id, t.identifier("bind")),
         [t.thisExpression()]
       );
-      let assignToBound = t.expressionStatement(t.assignmentExpression("=", node.id, bound));
-      return [unbound, assignToBound];
+      const assignToBound = t.expressionStatement(t.assignmentExpression("=",
+        path.node.id,
+        bound
+      ));
+
+      path.insertAfter(assignToBound);
     } else {
-      let bound = t.callExpression(
+      const unbound = toPlainFunction(path.node);
+      const bound = t.callExpression(
         t.memberExpression(unbound, t.identifier("bind")),
         [t.thisExpression()]
       );
-      return [bound];
+      path.replaceWith(bound);
     }
   }
 
@@ -123,6 +138,15 @@ export default function (babel) {
           t.assignmentExpression("=", retUid, targetPath.node.expression)
         );
       } else {
+        if (targetPath.get("expression").isAssignmentExpression()) {
+          if (!targetPath.get("expression.left").isMemberExpression()) {
+            // TODO: consider lifting this restriction, or giving a warning instead.
+            throw targetPath.buildCodeFrameError(
+              "Assignments are not implicitly returned. " +
+              "Annotate your function with `void` or return a value."
+            );
+          }
+        }
         targetPath.replaceWith(t.returnStatement(targetPath.node.expression));
       }
     }
@@ -259,6 +283,12 @@ export default function (babel) {
     }
   }
 
+  function replaceWithConst(path, id, init) {
+    path.replaceWith(t.variableDeclaration("const", [
+      t.variableDeclarator(id, init)
+    ]));
+    path.scope.registerBinding("const", path.get("declarations.0.id"));
+  }
 
   // TYPE DEFINITIONS
 
@@ -463,6 +493,7 @@ export default function (babel) {
 
         if (path.node.elem) {
           // generate `const x = arr[i];`
+          let idPath = path.get("id");
           let elemDecl = t.variableDeclaration("const", [
             t.variableDeclarator(path.node.elem, t.memberExpression(
               path.node.array, id, true
@@ -477,6 +508,8 @@ export default function (babel) {
               path.node.body,
             ]));
           }
+          // may not be necessary?
+          path.get("body").scope.registerBinding("const", idPath);
         }
 
         let forNode = t.forStatement(init, test, update, path.node.body);
@@ -540,12 +573,12 @@ export default function (babel) {
 
       NamedArrowFunction(path) {
         if (path.node.skinny) {
-          path.replaceWith(toPlainFunction(path.node));
+          replaceWithPlainFunction(path);
         } else if (path.node.generator) {
           // there are no arrow-generators in ES6, so can't compile to arrow
-          path.replaceWithMultiple(toBoundFunction(path.node));
+          replaceWithBoundFunction(path);
         } else {
-          path.replaceWith(toArrowFunction(path.node));
+          replaceWithArrowFunction(path);
         }
       },
 
@@ -571,9 +604,9 @@ export default function (babel) {
 
       ArrowFunctionExpression(path) {
         if (path.node.skinny) {
-          path.replaceWith(toPlainFunction(path.node));
+          replaceWithPlainFunction(path);
         } else if (path.node.generator) {
-          path.replaceWithMultiple(toBoundFunction(path.node));
+          replaceWithBoundFunction(path);
         }
       },
 
@@ -637,6 +670,9 @@ export default function (babel) {
         if (!isVoid) {
           addImplicitReturns(path);
         }
+
+        // somehow this wasn't being done... may signal deeper issues...
+        path.getFunctionParent().scope.registerDeclaration(path);
       },
 
       IfExpression(path) {
@@ -650,6 +686,28 @@ export default function (babel) {
 
         path.replaceWith(t.conditionalExpression(path.node.test, path.node.consequent, path.node.alternate));
       },
+
+      AssignmentExpression(path) {
+        let node = path.node;
+        if (node.operator === "=") {
+          if (t.isMemberExpression(path.node.left)) return;
+
+          // Ensure variables are declared
+          for (const id in path.getBindingIdentifiers()) {
+            const binding = path.scope.getBinding(id);
+            if (!binding) {
+              const allBindings = Object.keys(path.scope.getAllBindings());
+              throw path.buildCodeFrameError(
+                `Cannot assign to undeclared variable in LightScript.
+                 Bindings currently in scope: [${allBindings.join(", ")}].
+                `);
+            } else if (binding.kind === "const") {
+              throw path.buildCodeFrameError("Assignment to constant variable.");
+            }
+          }
+        }
+      },
+
 
     },
   };
