@@ -147,6 +147,7 @@ export default function (babel) {
             );
           }
         }
+
         targetPath.replaceWith(t.returnStatement(targetPath.node.expression));
       }
     }
@@ -467,6 +468,17 @@ export default function (babel) {
     }
   });
 
+  reallyDefineType("SafeAwaitExpression", {
+    builder: ["argument"],
+    visitor: ["argument"],
+    aliases: ["AwaitExpression", "Expression", "Terminatorless"],
+    fields: {
+      argument: {
+        validate: t.assertNodeType("Expression"),
+      }
+    }
+  });
+
 
   return {
     manipulateOptions(opts, parserOpts) {
@@ -689,7 +701,15 @@ export default function (babel) {
 
       AssignmentExpression(path) {
         let node = path.node;
-        if (node.operator === "=") {
+        if (node.operator === "<-" || node.operator === "<!-") {
+          // if we leave as AssignmentExpression, turn into =
+          node.operator = "=";
+          if (!path.parentPath.isExpressionStatement()) return;
+          if (path.get("left").isMemberExpression()) return;
+
+          // wrap in const
+          return replaceWithConst(path.parentPath, node.left, node.right);
+        } else if (node.operator === "=") {
           if (t.isMemberExpression(path.node.left)) return;
 
           // Ensure variables are declared
@@ -706,6 +726,23 @@ export default function (babel) {
             }
           }
         }
+      },
+
+      SafeAwaitExpression(path) {
+        const errId = path.scope.generateUidIdentifier("err");
+
+        const tryCatch = t.tryStatement(
+          t.blockStatement([
+            t.returnStatement(t.awaitExpression(path.node.argument))
+          ]),
+          t.catchClause(errId, t.blockStatement([
+            t.returnStatement(errId)
+          ])),
+        );
+        const fn = t.arrowFunctionExpression([], t.blockStatement([tryCatch]), true);
+        // TODO: returntype annotation
+        const iife = t.callExpression(fn, []);
+        path.replaceWith(iife);
       },
 
 
