@@ -479,6 +479,10 @@ export default function (babel) {
     }
   });
 
+  reallyDefineType("SafeMemberExpression", {
+    inherits: "MemberExpression",
+    aliases: ["MemberExpression", "Expression", "LVal"],
+  });
 
   return {
     manipulateOptions(opts, parserOpts) {
@@ -743,6 +747,27 @@ export default function (babel) {
         // TODO: returntype annotation
         const iife = t.callExpression(fn, []);
         path.replaceWith(iife);
+      },
+
+      SafeMemberExpression(path) {
+        // x?.y -> x == null ? x : x.y
+        // x?[y] -> x == null ? x : x[y]
+        const { node } = path;
+        const { object } = node;
+
+        let left;
+        if (object.type === "Identifier" || object.type === "SafeMemberExpression") {
+          left = object;
+        } else {
+          const ref = path.scope.generateDeclaredUidIdentifier("ref");
+          node.object = ref;
+          left = t.assignmentExpression("=", ref, object);
+        }
+
+        const nullCheck = t.binaryExpression("==", left, t.nullLiteral());
+        node.type = "MemberExpression";
+        const ternary = t.conditionalExpression(nullCheck, t.nullLiteral(), node);
+        path.replaceWith(ternary);
       },
 
 
