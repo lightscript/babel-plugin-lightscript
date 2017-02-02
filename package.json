@@ -10,8 +10,12 @@
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
   "license": "ISC",
   "dependencies": {
-    "babel": "^6.5.2",
-    "babel-cli": "^6.18.0",
+    "babylon-lightscript": "lightscript/babylon-lightscript#lightscript"
+  },
+  "devDependencies": {
+    "babel-helper-plugin-test-runner": "^6.18.0",
+    "babel-plugin-syntax-jsx": "^6.18.0",
+    "mocha": "^3.2.0",
     "babel-core": "^6.18.2",
     "babel-eslint": "^7.0.0",
     "babel-preset-eslatest-node6": "^1.0.1",
@@ -19,10 +23,5 @@
     "eslint-config-babel": "^3.0.0",
     "eslint-plugin-babel": "^4.0.0",
     "eslint-plugin-flowtype": "^2.4.0"
-  },
-  "devDependencies": {
-    "babel-helper-plugin-test-runner": "^6.18.0",
-    "babel-plugin-syntax-jsx": "^6.18.0",
-    "mocha": "^3.2.0"
   }
 }
