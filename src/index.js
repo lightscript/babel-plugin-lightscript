@@ -14,7 +14,7 @@ export default function (babel) {
     t.TYPES.push(name);
 
     opts.aliases.forEach((alias) => {
-      t.FLIPPED_ALIAS_KEYS[alias] = t.FLIPPED_ALIAS_KEYS[alias] || [];
+      t.FLIPPED_ALIAS_KEYS[alias] = t.FLIPPED_ALIAS_KEYS[alias] || [alias];
       t.FLIPPED_ALIAS_KEYS[alias].push(name);
 
       if (!t.TYPES[alias]) t.TYPES.push(alias);
@@ -768,6 +768,16 @@ export default function (babel) {
         node.type = "MemberExpression";
         const ternary = t.conditionalExpression(nullCheck, t.nullLiteral(), node);
         path.replaceWith(ternary);
+      },
+
+      AwaitExpression(path) {
+        if (path.get("argument").isArrayExpression() || path.node.argument.type === "ArrayComprehension") {
+          const promiseDotAllCall = t.callExpression(
+            t.memberExpression(t.identifier("Promise"), t.identifier("all")),
+            [path.node.argument],
+          );
+          path.get("argument").replaceWith(promiseDotAllCall);
+        }
       },
 
 
