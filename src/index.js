@@ -4,22 +4,182 @@ import { parse } from "babylon-lightscript";
 export default function (babel) {
   const { types: t } = babel;
 
+  // BABEL-TYPES copypasta; see https://github.com/babel/babel/pull/4886
 
-  // HELPER FUNCTIONS
+  function getType(val) {
+    if (Array.isArray(val)) {
+      return "array";
+    } else if (val === null) {
+      return "null";
+    } else if (val === undefined) {
+      return "undefined";
+    } else {
+      return typeof val;
+    }
+  }
 
-  function reallyDefineType(name, opts) {
-    t.defineType(name, opts);
+  function assertEach(callback: Function): Function {
+    function validator(node, key, val) {
+      if (!Array.isArray(val)) return;
+
+      for (let i = 0; i < val.length; i++) {
+        callback(node, `${key}[${i}]`, val[i]);
+      }
+    }
+    validator.each = callback;
+    return validator;
+  }
+
+  function assertOneOf(...vals): Function {
+    function validate(node, key, val) {
+      if (vals.indexOf(val) < 0) {
+        throw new TypeError(
+          `Property ${key} expected value to be one of ${JSON.stringify(vals)} but got ${JSON.stringify(val)}`
+        );
+      }
+    }
+
+    validate.oneOf = vals;
+
+    return validate;
+  }
+
+  function assertNodeType(...types: Array<string>): Function {
+    function validate(node, key, val) {
+      let valid = false;
+
+      for (const type of types) {
+        if (t.is(type, val)) {
+          valid = true;
+          break;
+        }
+      }
+
+      if (!valid) {
+        throw new TypeError(
+          `Property ${key} of ${node.type} expected node to be of a type ${JSON.stringify(types)} ` +
+          `but instead got ${JSON.stringify(val && val.type)}`
+        );
+      }
+    }
+
+    validate.oneOfNodeTypes = types;
+
+    return validate;
+  }
+
+  function assertNodeOrValueType(...types: Array<string>): Function {
+    function validate(node, key, val) {
+      let valid = false;
+
+      for (const type of types) {
+        if (getType(val) === type || t.is(type, val)) {
+          valid = true;
+          break;
+        }
+      }
+
+      if (!valid) {
+        throw new TypeError(
+          `Property ${key} of ${node.type} expected node to be of a type ${JSON.stringify(types)} ` +
+          `but instead got ${JSON.stringify(val && val.type)}`
+        );
+      }
+    }
+
+    validate.oneOfNodeOrValueTypes = types;
+
+    return validate;
+  }
+
+  function assertValueType(type: string): Function {
+    function validate(node, key, val) {
+      const valid = getType(val) === type;
+
+      if (!valid) {
+        throw new TypeError(`Property ${key} expected type of ${type} but got ${getType(val)}`);
+      }
+    }
+
+    validate.type = type;
+
+    return validate;
+  }
+
+  function chain(...fns: Array<Function>): Function {
+    function validate(...args) {
+      for (const fn of fns) {
+        fn(...args);
+      }
+    }
+    validate.chainOf = fns;
+    return validate;
+  }
+
+  function definePluginType(
+    type: string,
+    opts: {
+      fields?: Object;
+      visitor?: Array<string>;
+      aliases?: Array<string>;
+      builder?: Array<string>;
+      inherits?: string;
+      deprecatedAlias?: string;
+    } = {},
+  ) {
+    const inherits = {};
+    if (opts.inherits) {
+      inherits.visitor = t.VISITOR_KEYS[opts.inherits];
+      inherits.builder = t.BUILDER_KEYS[opts.inherits];
+      inherits.fields = t.NODE_FIELDS[opts.inherits];
+      inherits.aliases = t.ALIAS_KEYS[opts.inherits];
+    }
+
+    opts.fields  = opts.fields || inherits.fields || {};
+    opts.visitor = opts.visitor || inherits.visitor || [];
+    opts.aliases = opts.aliases || inherits.aliases || [];
+    opts.builder = opts.builder || inherits.builder || opts.visitor || [];
+
+    if (opts.deprecatedAlias) {
+      t.DEPRECATED_KEYS[opts.deprecatedAlias] = type;
+    }
+
+    // ensure all field keys are represented in `fields`
+    for (const key of (opts.visitor.concat(opts.builder): Array<string>)) {
+      opts.fields[key] = opts.fields[key] || {};
+    }
+
+    for (const key in opts.fields) {
+      const field = opts.fields[key];
+
+      if (opts.builder.indexOf(key) === -1) {
+        field.optional = true;
+      }
+      if (field.default === undefined) {
+        field.default = null;
+      } else if (!field.validate) {
+        field.validate = assertValueType(getType(field.default));
+      }
+    }
+
+    t.VISITOR_KEYS[type] = opts.visitor;
+    t.BUILDER_KEYS[type] = opts.builder;
+    t.NODE_FIELDS[type]  = opts.fields;
+    t.ALIAS_KEYS[type]   = opts.aliases;
 
     // the below should not be necessary; see https://github.com/babel/babel/pull/4886
-    t.TYPES.push(name);
+    t.TYPES.push(type);
 
     opts.aliases.forEach((alias) => {
       t.FLIPPED_ALIAS_KEYS[alias] = t.FLIPPED_ALIAS_KEYS[alias] || [alias];
-      t.FLIPPED_ALIAS_KEYS[alias].push(name);
+      t.FLIPPED_ALIAS_KEYS[alias].push(type);
 
       if (!t.TYPES[alias]) t.TYPES.push(alias);
     });
   }
+
+
+  // HELPER FUNCTIONS
 
   function transformTerminalExpressionsIntoArrPush(path, arrId) {
     path.resync(); // not sure if this is necessary... c/p from addImplicitReturns
@@ -202,7 +362,7 @@ export default function (babel) {
 
     // `this.method = this.method.bind(this);`
     let assignments = methodIds.map((methodId) => {
-      t.assertOneOf(methodId, ["Identifier", "Expression"]);
+      assertOneOf(methodId, ["Identifier", "Expression"]);
 
       let isComputed = !t.isIdentifier(methodId);
       let thisDotMethod = t.memberExpression(t.thisExpression(), methodId, isComputed);
@@ -250,11 +410,11 @@ export default function (babel) {
       assignId = path.getStatementParent().scope.generateDeclaredUidIdentifier(id);
       inExpression = true;
     }
-    t.assertOneOf(assignId, ["Identifier", "MemberExpression"]);
+    assertOneOf(assignId, ["Identifier", "MemberExpression"]);
 
     let assignments = methodIds.map((methodId) => {
       // could be computed, eg `['blah']() => {}`
-      t.assertOneOf(methodId, ["Identifier", "Expression"]);
+      assertOneOf(methodId, ["Identifier", "Expression"]);
       let isComputed = !t.isIdentifier(methodId);
       let objDotMethod = t.memberExpression(assignId, methodId, isComputed);
       let bind = t.callExpression(
@@ -293,79 +453,79 @@ export default function (babel) {
 
   // TYPE DEFINITIONS
 
-  reallyDefineType("ForFromArrayStatement", {
+  definePluginType("ForFromArrayStatement", {
     visitor: ["id", "elem", "array", "body"],
     aliases: ["Scopable", "Statement", "For", "BlockParent", "Loop", "ForXStatement", "ForFrom"],
     fields: {
       id: {
-        validate: t.assertNodeType("Identifier"),
+        validate: assertNodeType("Identifier"),
       },
       elem: {
-        validate: t.assertNodeType("Identifier"),
+        validate: assertNodeType("Identifier"),
         optional: true,
       },
       array: {
-        validate: t.assertNodeType("Expression"),
+        validate: assertNodeType("Expression"),
       },
       body: {
-        validate: t.assertNodeType("Statement"),
+        validate: assertNodeType("Statement"),
       },
     },
   });
 
-  reallyDefineType("ForFromRangeStatement", {
+  definePluginType("ForFromRangeStatement", {
     visitor: ["id", "rangeStart", "rangeEnd", "inclusive", "body"],
     aliases: ["Scopable", "Statement", "For", "BlockParent", "Loop", "ForXStatement"],
     fields: {
       id: {
-        validate: t.assertNodeType("Identifier"),
+        validate: assertNodeType("Identifier"),
         optional: true,
       },
       rangeStart: {
-        validate: t.assertNodeType("Expression"),
+        validate: assertNodeType("Expression"),
       },
       rangeEnd: {
-        validate: t.assertNodeType("Expression"),
+        validate: assertNodeType("Expression"),
       },
       inclusive: {
-        validate: t.assertValueType("boolean"),
+        validate: assertValueType("boolean"),
       },
       body: {
-        validate: t.assertNodeType("Statement"),
+        validate: assertNodeType("Statement"),
       },
     },
   });
 
-  reallyDefineType("ArrayComprehension", {
+  definePluginType("ArrayComprehension", {
     visitor: ["loop"],
     aliases: ["ArrayExpression", "Expression"],
     fields: {
       loop: {
-        validate: t.assertNodeType("ForStatement"),
+        validate: assertNodeType("ForStatement"),
       },
     },
   });
 
-  reallyDefineType("TildeCallExpression", {
+  definePluginType("TildeCallExpression", {
     visitor: ["left", "right", "arguments"],
     aliases: ["CallExpression", "Expression"],
     fields: {
       left: {
-        validate: t.assertNodeType("Expression"),
+        validate: assertNodeType("Expression"),
       },
       right: {
-        validate: t.assertOneOf("Identifier", "MemberExpression"),
+        validate: assertOneOf("Identifier", "MemberExpression"),
       },
       arguments: {
-        validate: t.chain(
-          t.assertValueType("array"),
-          t.assertEach(t.assertNodeType("Expression", "SpreadElement"))
+        validate: chain(
+          assertValueType("array"),
+          assertEach(assertNodeType("Expression", "SpreadElement"))
         ),
       },
     },
   });
 
-  reallyDefineType("NamedArrowDeclaration", {
+  definePluginType("NamedArrowDeclaration", {
     builder: ["id", "params", "body", "skinny", "async", "generator"],
     visitor: ["id", "params", "body", "returnType", "typeParameters"],
     aliases: [
@@ -381,32 +541,32 @@ export default function (babel) {
     ],
     fields: {  // DUP in NamedArrowMemberExpression
       id: {
-        validate: t.assertNodeType("Identifier"),
+        validate: assertNodeType("Identifier"),
       },
       params: {
-        validate: t.chain(
-          t.assertValueType("array"),
-          t.assertEach(t.assertNodeType("LVal"))
+        validate: chain(
+          assertValueType("array"),
+          assertEach(assertNodeType("LVal"))
         ),
       },
       body: {
-        validate: t.assertNodeType("BlockStatement", "Expression"),
+        validate: assertNodeType("BlockStatement", "Expression"),
       },
       skinny: {
-        validate: t.assertValueType("boolean")
+        validate: assertValueType("boolean")
       },
       generator: {
         default: false,
-        validate: t.assertValueType("boolean")
+        validate: assertValueType("boolean")
       },
       async: {
         default: false,
-        validate: t.assertValueType("boolean")
+        validate: assertValueType("boolean")
       },
     },
   });
 
-  reallyDefineType("NamedArrowExpression", {
+  definePluginType("NamedArrowExpression", {
     inherits: "NamedArrowDeclaration",
     aliases: [
       "Scopable",
@@ -419,67 +579,67 @@ export default function (babel) {
     ],
   });
 
-  reallyDefineType("NamedArrowMemberExpression", {
+  definePluginType("NamedArrowMemberExpression", {
     inherits: "NamedArrowExpression",
     fields: {  // c/p from NamedArrowExpression except for `object`
       id: {
-        validate: t.assertNodeType("Identifier"),
+        validate: assertNodeType("Identifier"),
       },
       object: {
-        validate: t.assertNodeType("Identifier", "MemberExpression"),
+        validate: assertNodeType("Identifier", "MemberExpression"),
       },
       params: {
-        validate: t.chain(
-          t.assertValueType("array"),
-          t.assertEach(t.assertNodeType("LVal"))
+        validate: chain(
+          assertValueType("array"),
+          assertEach(assertNodeType("LVal"))
         ),
       },
       body: {
-        validate: t.assertNodeType("BlockStatement", "Expression"),
+        validate: assertNodeType("BlockStatement", "Expression"),
       },
       skinny: {
-        validate: t.assertValueType("boolean")
+        validate: assertValueType("boolean")
       },
       generator: {
         default: false,
-        validate: t.assertValueType("boolean")
+        validate: assertValueType("boolean")
       },
       async: {
         default: false,
-        validate: t.assertValueType("boolean")
+        validate: assertValueType("boolean")
       },
     },
   });
 
-  reallyDefineType("IfExpression", {
+  definePluginType("IfExpression", {
     visitor: ["test", "consequent", "alternate"],
     aliases: ["Expression", "Conditional"],
     fields: {
       test: {
-        validate: t.assertNodeType("Expression")
+        validate: assertNodeType("Expression")
       },
       consequent: {
-        validate: t.assertNodeType("Expression", "BlockStatement")
+        validate: assertNodeType("Expression", "BlockStatement")
       },
       alternate: {
         optional: true,
-        validate: t.assertNodeType("Expression", "BlockStatement")
+        validate: assertNodeType("Expression", "BlockStatement")
       }
     }
   });
 
-  reallyDefineType("SafeAwaitExpression", {
+  definePluginType("SafeAwaitExpression", {
     builder: ["argument"],
     visitor: ["argument"],
     aliases: ["AwaitExpression", "Expression", "Terminatorless"],
     fields: {
       argument: {
-        validate: t.assertNodeType("Expression"),
+        validate: assertNodeType("Expression"),
       }
     }
   });
 
-  reallyDefineType("SafeMemberExpression", {
+  definePluginType("SafeMemberExpression", {
     inherits: "MemberExpression",
     aliases: ["MemberExpression", "Expression", "LVal"],
   });
