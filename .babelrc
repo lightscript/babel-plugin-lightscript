@@ -1,3 +1,4 @@
 {
-  "presets": ["eslatest-node6"]
+  "presets": ["eslatest-node6"],
+  "plugins": ["add-module-exports"]
 }

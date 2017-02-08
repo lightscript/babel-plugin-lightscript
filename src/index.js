@@ -718,11 +718,15 @@ export default function (babel) {
 
           // Ensure variables are declared
           for (const id in path.getBindingIdentifiers()) {
+            // HACK: allow babel-inserted variables to get away with assigning
+            if (id && id.indexOf("_") === 0) continue;
+
             const binding = path.scope.getBinding(id);
             if (!binding) {
               const allBindings = Object.keys(path.scope.getAllBindings());
               throw path.buildCodeFrameError(
                 `Cannot assign to undeclared variable in LightScript.
+                 Trying to assign ${id}.
                  Bindings currently in scope: [${allBindings.join(", ")}].
                 `);
             } else if (binding.kind === "const") {
