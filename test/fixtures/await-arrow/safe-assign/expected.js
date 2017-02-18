@@ -2,10 +2,9 @@ async function fn() {
   const x = (async () => {
     try {
       return await fetch();
-    } catch (_err2) {
-      return _err2;
+    } catch (_err) {
+      return _err;
     }
   })();
-
   return x + 1;
 }

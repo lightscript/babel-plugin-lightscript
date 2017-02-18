@@ -1,8 +1,8 @@
 
 fizzBuzz(n = 100) ->
-  arr := []
+  arr = []
   for i from 1 til n+1:
-    x :=
+    x =
       if i % 3 == 0 and i % 5 == 0:
         "fizzbuzz"
       elif i % 3 == 0:

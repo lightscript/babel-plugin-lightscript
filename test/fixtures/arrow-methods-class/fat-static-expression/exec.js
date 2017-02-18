@@ -1,8 +1,8 @@
 x(klass) ->
-  f := klass.f
+  f = klass.f
   f()
 
-name := x(
+name = x(
   class A:
     static f() =>
       this.name

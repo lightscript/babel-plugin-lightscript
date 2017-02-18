@@ -1,5 +1,5 @@
 f(...args) -> args
-o := {
+o = {
   a: 2
   m() => this
   g(x) -> x + 1

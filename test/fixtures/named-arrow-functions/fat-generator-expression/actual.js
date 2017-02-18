@@ -1,3 +1,3 @@
-x := fn() =*>
+x = fn() =*>
   yield 1
   yield 2

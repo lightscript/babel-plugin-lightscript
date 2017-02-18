@@ -1,4 +1,4 @@
 let klass
-klass = class A:
+now klass = class A:
   static f() =>
     1

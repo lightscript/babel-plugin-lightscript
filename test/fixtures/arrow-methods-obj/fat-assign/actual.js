@@ -1,5 +1,5 @@
 let o
-o = {
+now o = {
   f() =>
     this
 }

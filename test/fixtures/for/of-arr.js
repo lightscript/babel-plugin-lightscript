@@ -1,5 +1,5 @@
 let y
 for [ x ] of [ [1], [4, 0] ]:
-  y = x
+  now y = x
 
 assert.equal(y, 4)

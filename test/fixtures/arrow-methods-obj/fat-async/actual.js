@@ -1,4 +1,4 @@
-o := {
+o = {
   f() =/>
     await this
 }

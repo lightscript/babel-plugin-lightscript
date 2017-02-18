@@ -1,2 +1,2 @@
 fn(x): void ->
-  x = 4
+  now x = 4

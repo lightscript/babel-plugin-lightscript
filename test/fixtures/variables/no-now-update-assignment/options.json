@@ -1,0 +1,3 @@
+{
+  "throws": "Incorrect assignment: to reassign, use `now`; to assign as `const`, put on its own line."
+}

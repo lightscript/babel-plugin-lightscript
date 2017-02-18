@@ -1,1 +1,1 @@
-x := if true: 1
+x = if true: 1

@@ -5,6 +5,7 @@ export default function (babel) {
   const { types: t } = babel;
 
   // BABEL-TYPES copypasta; see https://github.com/babel/babel/pull/4886
+  /* eslint-disable no-unused-vars */
 
   function getType(val) {
     if (Array.isArray(val)) {
@@ -115,6 +116,8 @@ export default function (babel) {
     validate.chainOf = fns;
     return validate;
   }
+
+  /* eslint-enable no-unused-vars */
 
   function definePluginType(
     type: string,
@@ -442,13 +445,6 @@ export default function (babel) {
       path.get(key).canSwapBetweenExpressionAndStatement = () => true;
       path.get(key).replaceExpressionWithStatements(path.node[key].body);
     }
-  }
-
-  function replaceWithConst(path, id, init) {
-    path.replaceWith(t.variableDeclaration("const", [
-      t.variableDeclarator(id, init)
-    ]));
-    path.scope.registerBinding("const", path.get("declarations.0.id"));
   }
 
   // TYPE DEFINITIONS
@@ -864,35 +860,17 @@ export default function (babel) {
       },
 
       AssignmentExpression(path) {
-        let node = path.node;
-        if (node.operator === "<-" || node.operator === "<!-") {
-          // if we leave as AssignmentExpression, turn into =
-          node.operator = "=";
-          if (!path.parentPath.isExpressionStatement()) return;
-          if (path.get("left").isMemberExpression()) return;
+        if (path.node.operator === "<-" || path.node.operator === "<!-") {
+          path.node.operator = "=";
+        }
 
-          // wrap in const
-          return replaceWithConst(path.parentPath, node.left, node.right);
-        } else if (node.operator === "=") {
-          if (t.isMemberExpression(path.node.left)) return;
+        // TODO: consider enforcing `now` for MemberExpression too
+        if (t.isMemberExpression(path.node.left)) return;
 
-          // Ensure variables are declared
-          for (const id in path.getBindingIdentifiers()) {
-            // HACK: allow babel-inserted variables to get away with assigning
-            if (id && id.indexOf("_") === 0) continue;
-
-            const binding = path.scope.getBinding(id);
-            if (!binding) {
-              const allBindings = Object.keys(path.scope.getAllBindings());
-              throw path.buildCodeFrameError(
-                `Cannot assign to undeclared variable in LightScript.
-                 Trying to assign ${id}.
-                 Bindings currently in scope: [${allBindings.join(", ")}].
-                `);
-            } else if (binding.kind === "const") {
-              throw path.buildCodeFrameError("Assignment to constant variable.");
-            }
-          }
+        if (path.node.isNowAssign === false) {
+          throw path.buildCodeFrameError(
+            "Incorrect assignment: to reassign, use `now`; to assign as `const`, put on its own line."
+          );
         }
       },
 
