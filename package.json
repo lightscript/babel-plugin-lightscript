@@ -12,6 +12,9 @@
   "dependencies": {
     "babylon-lightscript": "^0.0.1"
   },
+  "files": [
+    "lib"
+  ],
   "devDependencies": {
     "babel-cli": "^6.22.2",
     "babel-core": "^6.18.2",
