@@ -447,6 +447,22 @@ export default function (babel) {
     }
   }
 
+  function checkVariableNotShadowed(path) {
+    // ignore top-level; same-level will throw a different error.
+    if (!path.scope.parent) return;
+
+    for (const id in path.get("declarations.0").getBindingIdentifiers()) {
+      if (path.scope.parent.hasBinding(id)) {
+        throw path.buildCodeFrameError(
+          `\`${id}\` is shadowed from a higher scope. ` +
+          `If you want to reassign the variable, use \`now ${id} = ...\`. ` +
+          "If you want to declare a new shadowed \`const\` variable, " +
+          `you must use \`const ${id} = ...\` explicitly.`
+        );
+      }
+    }
+  }
+
   // TYPE DEFINITIONS
 
   definePluginType("ForFromArrayStatement", {
@@ -919,6 +935,15 @@ export default function (babel) {
             [path.node.argument],
           );
           path.get("argument").replaceWith(promiseDotAllCall);
+        }
+      },
+
+      VariableDeclaration(path) {
+        // Error on auto-const when shadowing variable
+        if (path.node.kind === "const") {
+          if (path.node.extra && path.node.extra.implicit === true) {
+            checkVariableNotShadowed(path);
+          }
         }
       },
 

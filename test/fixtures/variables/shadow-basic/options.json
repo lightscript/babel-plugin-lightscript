@@ -1,0 +1,3 @@
+{
+  "throws": "`x` is shadowed from a higher scope. If you want to reassign the variable, use `now x = ...`. If you want to declare a new shadowed `const` variable, you must use `const x = ...` explicitly."
+}

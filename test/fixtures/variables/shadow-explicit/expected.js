@@ -1,4 +1,4 @@
 let x;
 if (true) {
-  const x = 7;
+  const x = 1;
 }
