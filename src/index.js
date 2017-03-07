@@ -924,8 +924,27 @@ export default function (babel) {
 
         const nullCheck = t.binaryExpression("==", left, t.nullLiteral());
         node.type = "MemberExpression";
-        const ternary = t.conditionalExpression(nullCheck, t.nullLiteral(), node);
-        path.replaceWith(ternary);
+        path.replaceWith(node);
+
+        // Gather trailing subscripts/calls, which are parent nodes:
+        // eg; in `o?.x.y()`, group trailing `.x.y()` into the ternary
+        let tail = path;
+        while (tail.parentPath) {
+          if (tail.parentPath.isMemberExpression()) {
+            tail = tail.parentPath;
+          } else if (tail.parentPath.isCallExpression()) {
+            if (tail.parentPath.get("callee") === tail) {
+              tail = tail.parentPath;
+            } else {
+              break;
+            }
+          } else {
+            break;
+          }
+        }
+
+        const ternary = t.conditionalExpression(nullCheck, t.nullLiteral(), tail.node);
+        tail.replaceWith(ternary);
       },
 
       AwaitExpression(path) {
