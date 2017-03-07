@@ -10,7 +10,7 @@
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
   "license": "MIT",
   "dependencies": {
-    "babylon-lightscript": "^0.0.1"
+    "babylon-lightscript": "^0.1.0"
   },
   "files": [
     "lib"
