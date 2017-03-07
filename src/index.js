@@ -290,6 +290,7 @@ export default function (babel) {
     for (let targetPath of completionRecords) {
       if (!targetPath.isExpressionStatement()) continue;
 
+      // TODO: fix loop detection, don't impliclitly return if terminal value is in loop
       let loop = targetPath.findParent((p) => p.isLoop());
       if (loop) {
         if (!retUid) {
@@ -303,11 +304,8 @@ export default function (babel) {
       } else {
         if (targetPath.get("expression").isAssignmentExpression()) {
           if (!targetPath.get("expression.left").isMemberExpression()) {
-            // TODO: consider lifting this restriction, or giving a warning instead.
-            throw targetPath.buildCodeFrameError(
-              "Assignments are not implicitly returned. " +
-              "Annotate your function with `void` or return a value."
-            );
+            // TODO: replace with linter error
+            return;
           }
         }
 
