@@ -736,6 +736,16 @@ export default function (babel) {
       },
 
       ArrayComprehension(path) {
+        // disallow Yield and Return
+        path.get("loop.body").traverse({
+          YieldExpression(yieldPath) {
+            throw yieldPath.buildCodeFrameError("`yield` is not allowed within Comprehensions.");
+          },
+          ReturnStatement(returnPath) {
+            throw returnPath.buildCodeFrameError("`return` is not allowed within Comprehensions.");
+          },
+        });
+
         const arrId = path.scope.generateUidIdentifier("arr");
 
         transformTerminalExpressionsIntoArrPush(path.get("loop"), arrId);
@@ -745,6 +755,12 @@ export default function (babel) {
           path.node.loop,
           t.returnStatement(arrId),
         ]));
+
+        // allow `await` inside async functions
+        if (path.getFunctionParent().node.async) {
+          fn.async = true;
+        }
+
         const iife = t.callExpression(fn, []);
         path.replaceWith(iife);
       },
