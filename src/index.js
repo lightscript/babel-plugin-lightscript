@@ -918,7 +918,8 @@ export default function (babel) {
         const fn = t.arrowFunctionExpression([], t.blockStatement([tryCatch]), true);
         // TODO: returntype annotation
         const iife = t.callExpression(fn, []);
-        path.replaceWith(iife);
+        const awaitExpr = t.awaitExpression(iife);
+        path.replaceWith(awaitExpr);
       },
 
       SafeMemberExpression(path) {
