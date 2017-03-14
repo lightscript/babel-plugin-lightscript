@@ -765,12 +765,17 @@ export default function (babel) {
         path.replaceWith(iife);
       },
 
-      TildeCallExpression(path) {
-        const callExpr = t.callExpression(path.node.right, [
-          path.node.left,
-          ...path.node.arguments,
-        ]);
-        path.replaceWith(callExpr);
+      TildeCallExpression: {
+        // run on exit instead of enter so that SafeMemberExpression
+        // can process differently from a wrapping CallExpression
+        // eg; `a?.b~c()` -> `a == null ? null : c(a.b)`
+        exit(path) {
+          const callExpr = t.callExpression(path.node.right, [
+            path.node.left,
+            ...path.node.arguments,
+          ]);
+          path.replaceWith(callExpr);
+        },
       },
 
       NamedArrowFunction(path) {
@@ -945,14 +950,15 @@ export default function (babel) {
         // eg; in `o?.x.y()`, group trailing `.x.y()` into the ternary
         let tail = path;
         while (tail.parentPath) {
-          if (tail.parentPath.isMemberExpression()) {
+          const parent = tail.parentPath;
+          const hasChainedParent = (
+            parent.isMemberExpression() ||
+            (parent.isCallExpression() && parent.get("callee") === tail) ||
+            (parent.node.type === "TildeCallExpression" && parent.get("left") === tail)
+          );
+
+          if (hasChainedParent) {
             tail = tail.parentPath;
-          } else if (tail.parentPath.isCallExpression()) {
-            if (tail.parentPath.get("callee") === tail) {
-              tail = tail.parentPath;
-            } else {
-              break;
-            }
           } else {
             break;
           }
