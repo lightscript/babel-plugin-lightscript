@@ -461,6 +461,19 @@ export default function (babel) {
     }
   }
 
+  function shouldParseAsLightScript(file) {
+    const { filename } = file.opts;
+    if (!filename) return true;
+    // TODO: consider "peeking" at the first line for a shebang or 'use lightscript' directive.
+    return (
+      // HACK: allow parsing .js test files in this repo.
+      // TODO: modify `babel-helper-plugin-test-runner` or something instead
+      filename.includes("babel-plugin-lightscript/test/fixtures") ||
+      filename.includes(".lsc") ||
+      filename.includes(".lsx")
+    );
+  }
+
   // TYPE DEFINITIONS
 
   definePluginType("ForFromArrayStatement", {
@@ -656,7 +669,8 @@ export default function (babel) {
 
   // traverse as top-level item so as to run before other babel plugins
   // (and avoid traversing any of their output)
-  function Program(path) {
+  function Program(path, state) {
+    if (!shouldParseAsLightScript(state.file)) return;
     path.traverse({
 
       ForFromArrayStatement(path) {
@@ -986,7 +1000,10 @@ export default function (babel) {
   }
 
   return {
-    manipulateOptions(opts, parserOpts) {
+    manipulateOptions(opts, parserOpts, file) {
+      if (!shouldParseAsLightScript(file)) return;
+
+      opts.lightscriptEnabled = true;
       opts.parserOpts = opts.parserOpts || {};
       opts.parserOpts.parser = parse;
       parserOpts.plugins.unshift("lightscript");
