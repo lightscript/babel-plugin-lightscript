@@ -1,3 +1,4 @@
 function fn(obj) {
-  return obj.x = 4;
+  obj.x = 4;
+  return obj.x;
 }

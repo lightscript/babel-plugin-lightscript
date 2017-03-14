@@ -20,13 +20,3 @@ g() ->
     5
 
 assert.equal(g(), 4)
-
-
-h() ->
-  for i from 0 til 5:
-    if i < 3:
-      for j from 0 til 3:
-        if j > 1:
-          i + j
-
-assert.equal(h(), 4)

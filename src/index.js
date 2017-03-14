@@ -286,30 +286,24 @@ export default function (babel) {
   function addImplicitReturns(path) {
     path.resync();
 
-    let retUid, completionRecords = path.get("body").getCompletionRecords();
-    for (let targetPath of completionRecords) {
-      if (!targetPath.isExpressionStatement()) continue;
+    const completionRecords = path.get("body").getCompletionRecords();
+    for (const targetPath of completionRecords) {
+      // don't implicitly return contents of loops
+      // TODO: add linting to discourage
+      const loop = targetPath.findParent((p) => p.isLoop() && p.getFunctionParent() === path);
+      if (loop) continue;
 
-      // TODO: fix loop detection, don't impliclitly return if terminal value is in loop
-      let loop = targetPath.findParent((p) => p.isLoop());
-      if (loop) {
-        if (!retUid) {
-          retUid = path.scope.generateDeclaredUidIdentifier("ret");
-          path.get("body").pushContainer("body", t.returnStatement(retUid));
-        }
-
-        targetPath.get("expression").replaceWith(
-          t.assignmentExpression("=", retUid, targetPath.node.expression)
-        );
-      } else {
+      if (targetPath.isExpressionStatement()) {
+        // TODO: add linting to discourage
         if (targetPath.get("expression").isAssignmentExpression()) {
-          if (!targetPath.get("expression.left").isMemberExpression()) {
-            // TODO: replace with linter error
-            return;
-          }
+          targetPath.insertAfter(t.returnStatement(targetPath.node.expression.left));
+        } else {
+          targetPath.replaceWith(t.returnStatement(targetPath.node.expression));
         }
-
-        targetPath.replaceWith(t.returnStatement(targetPath.node.expression));
+      } else if (targetPath.isVariableDeclaration()) {
+        // TODO: handle declarations.length > 1
+        // TODO: add linting to discourage
+        targetPath.insertAfter(t.returnStatement(targetPath.node.declarations[0].id));
       }
     }
   }

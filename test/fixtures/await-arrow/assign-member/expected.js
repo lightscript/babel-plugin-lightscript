@@ -1,3 +1,4 @@
 async function fn() {
-  return x.y = await fetch();
+  x.y = await fetch();
+  return x.y;
 }
