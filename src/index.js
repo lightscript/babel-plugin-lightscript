@@ -654,16 +654,10 @@ export default function (babel) {
     aliases: ["MemberExpression", "Expression", "LVal"],
   });
 
-  return {
-    manipulateOptions(opts, parserOpts) {
-      opts.parserOpts = opts.parserOpts || {};
-      opts.parserOpts.parser = parse;
-      parserOpts.plugins.unshift("lightscript");
-      // TODO: allow configuration options to disable these, as they slow down parsing
-      parserOpts.plugins.push("jsx", "flow");
-    },
-
-    visitor: {
+  // traverse as top-level item so as to run before other babel plugins
+  // (and avoid traversing any of their output)
+  function Program(path) {
+    path.traverse({
 
       ForFromArrayStatement(path) {
         let init, test, update;
@@ -988,6 +982,21 @@ export default function (babel) {
       },
 
 
+    });
+  }
+
+  return {
+    manipulateOptions(opts, parserOpts) {
+      opts.parserOpts = opts.parserOpts || {};
+      opts.parserOpts.parser = parse;
+      parserOpts.plugins.unshift("lightscript");
+      // TODO: allow configuration options to disable these, as they slow down parsing
+      parserOpts.plugins.push("jsx", "flow");
     },
+
+    visitor: {
+      Program,
+    },
+
   };
 }
