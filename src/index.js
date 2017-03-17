@@ -456,13 +456,16 @@ export default function (babel) {
   }
 
   function shouldParseAsLightScript(file) {
+    if (!file || !file.opts || !file.opts.filename) return true;
     const { filename } = file.opts;
-    if (!filename) return true;
+    // HACK: for lightscript-eslint, and possibly others
+    if (filename === "unknown") return true;
+
     // TODO: consider "peeking" at the first line for a shebang or 'use lightscript' directive.
     return (
       // HACK: allow parsing .js test files in this repo.
       // TODO: modify `babel-helper-plugin-test-runner` or something instead
-      filename.includes("babel-plugin-lightscript/test/fixtures") ||
+      filename.includes("test/fixtures") ||
       filename.includes(".lsc") ||
       filename.includes(".lsx")
     );
@@ -997,7 +1000,6 @@ export default function (babel) {
     manipulateOptions(opts, parserOpts, file) {
       if (!shouldParseAsLightScript(file)) return;
 
-      opts.lightscriptEnabled = true;
       opts.parserOpts = opts.parserOpts || {};
       opts.parserOpts.parser = parse;
       parserOpts.plugins.unshift("lightscript");
