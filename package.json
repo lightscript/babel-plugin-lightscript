@@ -8,9 +8,10 @@
     "build": "babel src --out-dir lib"
   },
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
+  "homepage": "http://lightscript.org/",
   "license": "MIT",
   "dependencies": {
-    "babylon-lightscript": "^0.2.0"
+    "babylon-lightscript": "^0.2.1"
   },
   "files": [
     "lib"
