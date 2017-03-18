@@ -338,7 +338,8 @@ export default function (babel) {
     if (node.superClass && constructorPath.parentPath.node.skinny && !containsSuperCall(constructorPath)) {
       let superCall;
       if (constructorPath.parentPath.node.params.length) {
-        superCall = t.expressionStatement(t.callExpression(t.super(), constructorPath.parentPath.node.params));
+        const params = constructorPath.parentPath.node.params;
+        superCall = t.expressionStatement(t.callExpression(t.super(), params));
       } else {
         let argsUid = path.scope.generateUidIdentifier("args");
         let params = [t.restElement(argsUid)];
