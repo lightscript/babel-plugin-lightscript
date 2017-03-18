@@ -1,6 +1,6 @@
 class A extends B {
   constructor(x, y) {
-    super(arguments);
+    super(x, y);
 
     foo(x, y);
   }f() {
