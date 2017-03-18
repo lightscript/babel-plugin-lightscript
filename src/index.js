@@ -743,6 +743,12 @@ export default function (babel) {
       ArrayComprehension(path) {
         // disallow Yield and Return
         path.get("loop.body").traverse({
+          AwaitExpression(awaitPath) {
+            throw awaitPath.buildCodeFrameError(
+              "`await` is not allowed within Comprehensions; " +
+              "instead, await the Comprehension (eg; `y <- [for x of xs: x]`)."
+            );
+          },
           YieldExpression(yieldPath) {
             throw yieldPath.buildCodeFrameError("`yield` is not allowed within Comprehensions.");
           },
@@ -760,11 +766,6 @@ export default function (babel) {
           path.node.loop,
           t.returnStatement(arrId),
         ]));
-
-        // allow `await` inside async functions
-        if (path.getFunctionParent().node.async) {
-          fn.async = true;
-        }
 
         const iife = t.callExpression(fn, []);
         path.replaceWith(iife);

@@ -1,0 +1,3 @@
+{
+  "throws": "`await` is not allowed within Comprehensions; instead, await the Comprehension (eg; `y <- [for x of xs: x]`)."
+}
