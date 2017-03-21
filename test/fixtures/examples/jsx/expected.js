@@ -1,3 +1,5 @@
+import React from "react";
+
 function otherCondition() {
   return true;
 }

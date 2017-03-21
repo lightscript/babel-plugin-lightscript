@@ -1,5 +1,5 @@
 import { parse } from "babylon-lightscript";
-
+import { defaultImports, lightscriptImports, lodashImports, reactImports, } from "./stdlib";
 
 export default function (babel) {
   const { types: t } = babel;
@@ -472,6 +472,109 @@ export default function (babel) {
     );
   }
 
+  // eg; 'react', 'react *', 'react default'
+  type ImportShorthand = string;
+
+  // eg; 'react', 'lodash/fp', './actions'
+  type ImportPath = string;
+
+  // eg; "React", "PropTypes"
+  type Specifier = string;
+
+  type ImportObj = {
+    default: ?Specifier,
+    namespace: ?Specifier,
+    others: [Specifier],
+  };
+
+  type Imports = {
+    [ImportPath]: ImportObj,
+  };
+
+  type Stdlib = false | {
+    [Specifier]: ImportShorthand,
+  };
+
+  function initializeStdlib(opts) {
+    let stdlib: Stdlib;
+
+
+    if (opts.stdlib === false) {
+      stdlib = false;
+    } else if (typeof opts.stdlib === "object") {
+      stdlib = Object.assign({},
+        opts.stdlib.lodash === false ? {} : lodashImports,
+        opts.stdlib.react === false ? {} : reactImports,
+        opts.stdlib.lightscript === false ? {} : lightscriptImports,
+        opts.stdlib
+      );
+    } else {
+      stdlib = defaultImports;
+    }
+    return stdlib;
+  }
+
+  function collectStdlibImport(stdlib: Stdlib, imports: Imports, specifier: Specifier) {
+    const [ importPath, suffix ] = stdlib[specifier].split(" ");
+
+    const isDefault = suffix === "default";
+    const isNamespace = suffix === "*";
+
+    // initialize import setup for filepath
+    if (!imports[importPath]) {
+      imports[importPath] = {
+        default: null,
+        namespace: null,
+        others: [],
+      };
+    }
+
+    if (isDefault) {
+      const existingDefault = imports[importPath].default;
+      if (!existingDefault) {
+        imports[importPath].default = specifier;
+      } else if (existingDefault !== specifier) {
+        throw new SyntaxError(
+          `Multiple "default" imports declared for "${importPath}": "${existingDefault}" and "${specifier}".`
+        );
+      }
+    } else if (isNamespace) {
+      const existingNamespace = imports[importPath].namespace;
+      if (!existingNamespace) {
+        imports[importPath].namespace = specifier;
+      } else if (existingNamespace !== specifier) {
+        throw new SyntaxError(
+          `Multiple "* as" imports declared for "${importPath}": "${existingNamespace}" and "${specifier}".`
+        );
+      }
+    } else {
+      if (imports[importPath].others.indexOf(specifier) < 0) {
+        imports[importPath].others.push(specifier);
+      }
+    }
+  }
+
+  function insertStdlibImports(path, imports: Imports) {
+    for (const importPath: ImportPath in imports) {
+      const imp: ImportObj = imports[importPath];
+      const specifiers = [];
+      if (imp.default) {
+        specifiers.push(t.importDefaultSpecifier(t.identifier(imp.default)));
+      }
+      if (imp.namespace) {
+        specifiers.push(t.importNamespaceSpecifier(t.identifier(imp.namespace)));
+      }
+      if (imp.others) {
+        for (const specifierName of imp.others) {
+          const importIdentifier = t.identifier(specifierName);
+          specifiers.push(t.importSpecifier(importIdentifier, importIdentifier));
+        }
+      }
+      const importDeclaration = t.importDeclaration(specifiers, t.stringLiteral(importPath));
+      path.unshiftContainer("body", importDeclaration);
+    }
+  }
+
   // TYPE DEFINITIONS
 
   definePluginType("ForFromArrayStatement", {
@@ -669,6 +772,11 @@ export default function (babel) {
   // (and avoid traversing any of their output)
   function Program(path, state) {
     if (!shouldParseAsLightScript(state.file)) return;
+
+    const stdlib: Stdlib = initializeStdlib(state.opts);
+    const imports: Imports = {};
+    let hasJSX = false;
+
     path.traverse({
 
       ForFromArrayStatement(path) {
@@ -994,8 +1102,30 @@ export default function (babel) {
         }
       },
 
+      // collect functions to be imported for the stdlib
+      ReferencedIdentifier(path) {
+        if (stdlib === false) return;
+
+        const { node, scope } = path;
+        if (stdlib[node.name] && !scope.hasBinding(node.name)) {
+          collectStdlibImport(stdlib, imports, node.name);
+        }
+      },
+
+      // track whether JSX is used for React in stdlib
+      JSXElement() {
+        if (stdlib === false) return;
+        hasJSX = true;
+      },
+
 
     });
+
+    if (hasJSX && stdlib.React) {
+      // TODO: allow custom pragmas
+      collectStdlibImport(stdlib, imports, "React");
+    }
+    insertStdlibImports(path, imports);
   }
 
   return {

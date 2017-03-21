@@ -1,0 +1,13 @@
+{
+  "plugins": [
+    ["lightscript", {
+      "stdlib": {
+        "Foo": "foo default",
+        "FooChild": "foo",
+        "FooSecondChild": "foo",
+        "Bar": "bar default",
+        "BarRest": "bar *"
+      }
+    }]
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    ["lightscript", {
+      "stdlib": {
+        "PropTypes": "react",
+        "redux": "redux *"
+      }
+    }]
+  ]
+}
