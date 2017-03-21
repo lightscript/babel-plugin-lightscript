@@ -14,8 +14,8 @@
     "babylon-lightscript": "^0.2.2"
   },
   "files": [
-    "./index.js",
-    "./stdlib.js"
+    "stdlib.js",
+    "index.js"
   ],
   "devDependencies": {
     "babel-cli": "^6.22.2",
