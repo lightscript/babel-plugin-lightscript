@@ -1,5 +1,5 @@
 import { parse } from "babylon-lightscript";
-
+import { defaultImports, lightscriptImports, lodashImports } from "./stdlib";
 
 export default function (babel) {
   const { types: t } = babel;
@@ -472,6 +472,78 @@ export default function (babel) {
     );
   }
 
+  // eg; 'react', 'lodash/fp', './actions'
+  type ImportPath = string;
+
+  // eg; "React", "PropTypes"
+  type Specifier = string;
+
+  type Imports = {
+    [ImportPath]: Array<Specifier>,
+  };
+
+  type Stdlib = false | {
+    [Specifier]: ImportPath,
+  };
+
+  function initializeStdlib(opts): Stdlib {
+    if (opts.stdlib === false) return false;
+
+    if (typeof opts.stdlib === "object") {
+      return Object.assign({},
+        opts.stdlib.lodash === false ? {} : lodashImports,
+        opts.stdlib.lightscript === false ? {} : lightscriptImports,
+      );
+    }
+
+    return defaultImports;
+  }
+
+  function collectStdlibImport(stdlib: Stdlib, imports: Imports, specifier: Specifier) {
+    const importPath = stdlib[specifier];
+
+    if (!imports[importPath]) {
+      imports[importPath] = [];
+    }
+
+    if (imports[importPath].indexOf(specifier) < 0) {
+      imports[importPath].push(specifier);
+    }
+  }
+
+  function insertStdlibImports(path, imports: Imports, useRequire) {
+    const declarations = [];
+    for (const importPath in imports) {
+      const specifierNames = imports[importPath];
+      const specifiers = [];
+
+      if (useRequire) {
+        // eg; `const { map, uniq } = require('lodash');`
+        for (const specifierName of specifierNames) {
+          const importIdentifier = t.identifier(specifierName);
+          specifiers.push(t.objectProperty(importIdentifier, importIdentifier, false, true));
+        }
+        const requirePattern = t.objectPattern(specifiers);
+        const requireCall = t.callExpression(t.identifier("require"), [
+          t.stringLiteral(importPath)
+        ]);
+        const requireStmt = t.variableDeclaration("const", [
+          t.variableDeclarator(requirePattern, requireCall),
+        ]);
+        declarations.push(requireStmt);
+      } else {
+        // eg; `import { map, uniq } from 'lodash';`
+        for (const specifierName of specifierNames) {
+          const importIdentifier = t.identifier(specifierName);
+          specifiers.push(t.importSpecifier(importIdentifier, importIdentifier));
+        }
+        const importDeclaration = t.importDeclaration(specifiers, t.stringLiteral(importPath));
+        declarations.push(importDeclaration);
+      }
+    }
+    path.unshiftContainer("body", declarations);
+  }
+
   // TYPE DEFINITIONS
 
   definePluginType("ForFromArrayStatement", {
@@ -669,6 +741,11 @@ export default function (babel) {
   // (and avoid traversing any of their output)
   function Program(path, state) {
     if (!shouldParseAsLightScript(state.file)) return;
+
+    const stdlib: Stdlib = initializeStdlib(state.opts);
+    const useRequire = state.opts.stdlib && state.opts.stdlib.require === true;
+    const imports: Imports = {};
+
     path.traverse({
 
       ForFromArrayStatement(path) {
@@ -994,8 +1071,20 @@ export default function (babel) {
         }
       },
 
+      // collect functions to be imported for the stdlib
+      ReferencedIdentifier(path) {
+        if (stdlib === false) return;
+
+        const { node, scope } = path;
+        if (stdlib[node.name] && !scope.hasBinding(node.name)) {
+          collectStdlibImport(stdlib, imports, node.name);
+        }
+      },
+
 
     });
+
+    insertStdlibImports(path, imports, useRequire);
   }
 
   return {

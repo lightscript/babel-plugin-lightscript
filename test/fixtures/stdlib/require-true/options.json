@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    ["lightscript", {
+      "stdlib": {
+        "require": true
+      }
+    }]
+  ]
+}

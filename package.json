@@ -2,10 +2,10 @@
   "name": "babel-plugin-lightscript",
   "version": "0.2.3",
   "description": "Compile LightScript to JavaScript.",
-  "main": "lib/index.js",
+  "main": "index.js",
   "scripts": {
     "test": "node node_modules/.bin/mocha test",
-    "build": "babel src --out-dir lib"
+    "build": "babel src --out-dir ."
   },
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
   "homepage": "http://lightscript.org/",
@@ -14,7 +14,8 @@
     "babylon-lightscript": "^0.2.1"
   },
   "files": [
-    "lib"
+    "./index.js",
+    "./stdlib.js"
   ],
   "devDependencies": {
     "babel-cli": "^6.22.2",
