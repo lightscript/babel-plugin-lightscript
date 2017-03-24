@@ -1,5 +1,5 @@
 let y
-for x of [4]:
+for const x of [4]:
   now y = x
 
 assert.equal(y, 4)

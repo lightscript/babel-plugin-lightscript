@@ -1,4 +1,4 @@
-for (x of
+for (now x of
   (): void =*>
     yield 1
     yield 2

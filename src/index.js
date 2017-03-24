@@ -209,6 +209,12 @@ export default function (babel) {
     return body;
   }
 
+  function ensureBlockBody(path) {
+    if (!t.isBlockStatement(path.node.body)) {
+      path.get("body").replaceWith(t.blockStatement([path.node.body]));
+    }
+  }
+
   function toPlainFunction(node) {
     let { id, params, body, generator, async } = node;
 
@@ -547,15 +553,15 @@ export default function (babel) {
   }
 
   // TYPE DEFINITIONS
-
-  definePluginType("ForFromArrayStatement", {
-    visitor: ["id", "elem", "array", "body"],
-    aliases: ["Scopable", "Statement", "For", "BlockParent", "Loop", "ForXStatement", "ForFrom"],
+  definePluginType("ForInArrayStatement", {
+    visitor: ["idx", "elem", "array", "body"],
+    aliases: ["Scopable", "Statement", "For", "BlockParent", "Loop", "ForXStatement", "ForIn"],
     fields: {
-      id: {
-        validate: assertNodeType("Identifier"),
-      },
       elem: {
+        validate: assertNodeType("Identifier"),
+        optional: true,
+      },
+      idx: {
         validate: assertNodeType("Identifier"),
         optional: true,
       },
@@ -568,22 +574,20 @@ export default function (babel) {
     },
   });
 
-  definePluginType("ForFromRangeStatement", {
-    visitor: ["id", "rangeStart", "rangeEnd", "inclusive", "body"],
-    aliases: ["Scopable", "Statement", "For", "BlockParent", "Loop", "ForXStatement"],
+  definePluginType("ForInObjectStatement", {
+    visitor: ["key", "val", "object", "body"],
+    aliases: ["Scopable", "Statement", "For", "BlockParent", "Loop", "ForXStatement", "ForIn"],
     fields: {
-      id: {
+      key: {
         validate: assertNodeType("Identifier"),
         optional: true,
       },
-      rangeStart: {
-        validate: assertNodeType("Expression"),
+      val: {
+        validate: assertNodeType("Identifier"),
+        optional: true,
       },
-      rangeEnd: {
+      object: {
         validate: assertNodeType("Expression"),
-      },
-      inclusive: {
-        validate: assertValueType("boolean"),
       },
       body: {
         validate: assertNodeType("Statement"),
@@ -750,65 +754,92 @@ export default function (babel) {
 
     path.traverse({
 
-      ForFromArrayStatement(path) {
-        let init, test, update;
+      ForInArrayStatement(path) {
+        // If array is a complex expression, generate: const _arr = expr
+        let refId;
+        if (!path.get("array").isIdentifier()) {
+          refId = path.scope.generateUidIdentifier("arr");
+          path.insertBefore(
+            t.variableDeclaration("const", [ t.variableDeclarator(refId, path.node.array )])
+          );
+        } else {
+          refId = path.node.array;
+        }
 
-        let id = path.node.id;
-        init = t.variableDeclaration("let", [
-          t.variableDeclarator(id, t.numericLiteral(0))
-        ]);
+        // let _i = 0, _len = array.length
+        let idx = path.node.idx || path.scope.generateUidIdentifier("i");
+        let len = path.scope.generateUidIdentifier("len");
+        let declarations = [
+          t.variableDeclarator(idx, t.numericLiteral(0)),
+          t.variableDeclarator(
+            len,
+            t.memberExpression(refId, t.identifier("length"))
+          )
+        ];
+        let init = t.variableDeclaration("let", declarations);
+        // _i < _len
+        let test = t.binaryExpression("<", idx, len);
+        // _i++
+        let update = t.updateExpression("++", idx);
 
-        test = t.binaryExpression("<", id,
-          t.memberExpression(path.node.array, t.identifier("length")));
-        update = t.updateExpression("++", id);
-
+        // Element initializer: const elem = _array[_i]
         if (path.node.elem) {
-          // generate `const x = arr[i];`
-          let idPath = path.get("id");
-          let elemDecl = t.variableDeclaration("const", [
-            t.variableDeclarator(path.node.elem, t.memberExpression(
-              path.node.array, id, true
-            ))
-          ]);
-
-          if (t.isBlockStatement(path.node.body)) {
-            path.get("body").unshiftContainer("body", elemDecl);
-          } else {
-            path.get("body").replaceWith(t.blockStatement([
-              elemDecl,
-              path.node.body,
-            ]));
-          }
-          // may not be necessary?
-          path.get("body").scope.registerBinding("const", idPath);
+          path.scope.push({
+            id: path.node.elem,
+            init: t.memberExpression(refId, idx, true),
+            kind: "const"
+          });
         }
 
         let forNode = t.forStatement(init, test, update, path.node.body);
         path.replaceWith(forNode);
       },
 
-      ForFromRangeStatement(path) {
-        let id, init, test, update;
+      ForInObjectStatement(path) {
+        let refId;
 
-        if (path.node.id) {
-          // for i from 0 til 10
-          id = path.node.id;
-          init = t.variableDeclaration("let", [
-            t.variableDeclarator(id, path.node.rangeStart)
-          ]);
+        // If object is a complex expression, generate: const _obj = expr
+        if (!path.get("object").isIdentifier()) {
+          refId = path.scope.generateUidIdentifier("obj");
+          path.insertBefore(
+            t.variableDeclaration("const", [ t.variableDeclarator(refId, path.node.object )])
+          );
         } else {
-          // for 0 til 10
-          id = path.scope.generateUidIdentifier("i");
-          init = t.variableDeclaration("let", [
-            t.variableDeclarator(id, path.node.rangeStart)
+          refId = path.node.object;
+        }
+
+        // Loop initializer: const _k
+        let key = path.node.key || path.scope.generateUidIdentifier("k");
+        let init = t.variableDeclaration("const", [ t.variableDeclarator(key, null) ]);
+
+        // if(!_obj.hasOwnProperty(_k)) continue
+        const hasOwnPropertyStmt = t.ifStatement(
+          t.unaryExpression(
+            "!",
+            t.callExpression(
+              t.memberExpression(refId, t.identifier("hasOwnProperty")),
+              [ key ]
+            )
+          ),
+          t.continueStatement()
+        );
+
+        // Element initializer: const val = _obj[_k]
+        let assignValStmt = null;
+        if (path.node.val) {
+          // TODO: note that destructuring takes place here for when we add that to the parser.
+          // can probably just pass the destructuring thing to the LHS of the declarator.
+          assignValStmt = t.variableDeclaration("const", [
+            t.variableDeclarator(path.node.val, t.memberExpression(refId, key, true))
           ]);
         }
 
-        let op = path.node.inclusive ? "<=" : "<";
-        test = t.binaryExpression(op, id, path.node.rangeEnd);
-        update = t.updateExpression("++", id);
+        // Add hasOwnProperty, followed by element initializer, to loop body
+        ensureBlockBody(path);
+        if (assignValStmt) path.get("body").unshiftContainer("body", assignValStmt);
+        path.get("body").unshiftContainer("body", hasOwnPropertyStmt);
 
-        let forNode = t.forStatement(init, test, update, path.node.body);
+        let forNode = t.forInStatement(init, refId, path.node.body);
         path.replaceWith(forNode);
       },
 

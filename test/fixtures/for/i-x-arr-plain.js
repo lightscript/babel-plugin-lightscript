@@ -1,7 +1,7 @@
 arr = [4, 5, 6]
 
 let x, y
-for i, e from arr:
+for idx i, elem e in arr:
   now x = i
   now y = e
 

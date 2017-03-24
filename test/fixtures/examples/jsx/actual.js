@@ -2,7 +2,7 @@ otherCondition() -> true
 
 ThingsList1({ things, selectedId }) =>
   <ul>
-    {[for thing of things:
+    {[for const thing of things:
         if thing.id == selectedId and otherCondition():
           <SpecialThing thing={thing} />
         else:
@@ -24,7 +24,7 @@ ThingsList2({ things, selectedId }) =>
 ThingsList3({ things, selectedId }) =>
   <ul>
     {[
-      for thing of things {
+      for elem thing in things {
         if thing.id == selectedId and otherCondition() {
           <SpecialThing thing={thing} />
         } else {
