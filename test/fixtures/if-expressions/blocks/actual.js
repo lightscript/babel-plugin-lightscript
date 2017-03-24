@@ -2,7 +2,7 @@ x = if true:
   1
   1
 elif true:
-  for x of []:
+  for now x of []:
     x
 else if true:
   3

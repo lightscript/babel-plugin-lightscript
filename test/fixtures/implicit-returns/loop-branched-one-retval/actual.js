@@ -1,5 +1,5 @@
 f() ->
-  for x of []:
+  for now x of []:
     if 0:
       0
     else if 1:

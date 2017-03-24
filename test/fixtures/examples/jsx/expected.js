@@ -34,13 +34,16 @@ const ThingsList3 = ({ things, selectedId }) => {
     {(() => {
       const _arr2 = [];
 
-      for (const thing of things) {
+      for (let _i = 0, _len = things.length; _i < _len; _i++) {
+        const thing = things[_i];
+
         if (thing.id === selectedId && otherCondition()) {
           _arr2.push(<SpecialThing thing={thing} />);
         } else {
           _arr2.push(<Thing thing={thing} />);
         }
       }
+
       return _arr2;
     })()}
   </ul>;

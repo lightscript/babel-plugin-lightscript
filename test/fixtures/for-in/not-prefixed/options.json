@@ -1,0 +1,3 @@
+{
+  "throws": "for-in requires a variable qualifier: `now` to reassign an existing variable, or `const`, `let`, `var` to declare a new one. Use `idx` or `elem` to iterate an array. Use `key` or `val` to iterate an object. (1:4)"
+}
