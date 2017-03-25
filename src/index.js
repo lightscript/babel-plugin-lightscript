@@ -287,17 +287,44 @@ export default function (babel) {
     return (typeof node.skinny === "boolean");
   }
 
+  function getCompletionRecords(path) {
+    let paths = [];
+
+    const add = function add(_path) {
+      if (_path) paths = paths.concat(getCompletionRecords(_path));
+    };
+
+    if (path.isIfStatement()) {
+      add(path.get("consequent"));
+      add(path.get("alternate"));
+    } else if (path.isDoExpression() || path.isFor() || path.isWhile()) {
+      add(path.get("body"));
+    } else if (path.isProgram() || path.isBlockStatement()) {
+      add(path.get("body").pop());
+    // } else if (path.isFunction()) {
+      // return getCompletionRecords(path.get("body"));
+    } else if (path.isTryStatement()) {
+      add(path.get("block"));
+      add(path.get("handler"));
+      add(path.get("finalizer"));
+    } else {
+      paths.push(path);
+    }
+
+    return paths;
+  }
+
   // c/p from replaceExpressionWithStatements
 
   function addImplicitReturns(path) {
     path.resync();
 
-    const completionRecords = path.get("body").getCompletionRecords();
+    const completionRecords = getCompletionRecords(path.get("body"));
     for (const targetPath of completionRecords) {
       // don't implicitly return contents of loops
       // TODO: add linting to discourage
       const loop = targetPath.findParent((p) => p.isLoop() && p.getFunctionParent() === path);
-      if (loop) continue;
+      if (loop || !targetPath.node) continue;
 
       if (targetPath.isExpressionStatement()) {
         // TODO: add linting to discourage
@@ -310,6 +337,8 @@ export default function (babel) {
         // TODO: handle declarations.length > 1
         // TODO: add linting to discourage
         targetPath.insertAfter(t.returnStatement(targetPath.node.declarations[0].id));
+      } else if (targetPath.isFunctionDeclaration() || targetPath.node.type === "NamedArrowDeclaration") {
+        targetPath.insertAfter(t.returnStatement(targetPath.node.id));
       }
     }
   }

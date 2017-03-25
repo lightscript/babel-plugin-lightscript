@@ -4,7 +4,7 @@
   "description": "Compile LightScript to JavaScript.",
   "main": "index.js",
   "scripts": {
-    "test": "node node_modules/.bin/mocha test",
+    "test": "mocha test",
     "test:debug": "node --inspect --debug-brk node_modules/.bin/_mocha test",
     "build": "babel src --out-dir ."
   },
