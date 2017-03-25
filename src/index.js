@@ -287,22 +287,25 @@ export default function (babel) {
     return (typeof node.skinny === "boolean");
   }
 
-  function getCompletionRecords(path) {
+  // c/p babel-traverse/src/path/family.js getCompletionRecords
+  function getTailExpressions(path, allowLoops) {
     let paths = [];
 
     const add = function add(_path) {
-      if (_path) paths = paths.concat(getCompletionRecords(_path));
+      if (_path) paths = paths.concat(getTailExpressions(_path));
     };
 
     if (path.isIfStatement()) {
       add(path.get("consequent"));
       add(path.get("alternate"));
-    } else if (path.isDoExpression() || path.isFor() || path.isWhile()) {
+    } else if (path.isDoExpression()) {
+      add(path.get("body"));
+    } else if (allowLoops && (path.isFor() || path.isWhile())) {
       add(path.get("body"));
     } else if (path.isProgram() || path.isBlockStatement()) {
       add(path.get("body").pop());
     // } else if (path.isFunction()) {
-      // return getCompletionRecords(path.get("body"));
+      // return getTailExpressions(path.get("body"));
     } else if (path.isTryStatement()) {
       add(path.get("block"));
       add(path.get("handler"));
@@ -319,7 +322,7 @@ export default function (babel) {
   function addImplicitReturns(path) {
     path.resync();
 
-    const completionRecords = getCompletionRecords(path.get("body"));
+    const completionRecords = getTailExpressions(path.get("body"));
     for (const targetPath of completionRecords) {
       // don't implicitly return contents of loops
       // TODO: add linting to discourage
