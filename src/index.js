@@ -340,7 +340,7 @@ export default function (babel) {
         // TODO: handle declarations.length > 1
         // TODO: add linting to discourage
         targetPath.insertAfter(t.returnStatement(targetPath.node.declarations[0].id));
-      } else if (targetPath.isFunctionDeclaration() || targetPath.node.type === "NamedArrowDeclaration") {
+      } else if (targetPath.isFunctionDeclaration()) {
         targetPath.insertAfter(t.returnStatement(targetPath.node.id));
       }
     }
@@ -1021,18 +1021,20 @@ export default function (babel) {
         }
       },
 
-      Function(path) {
-        if (path.node.kind === "constructor" || path.node.kind === "set") return;
+      Function: {
+        exit(path) {
+          if (path.node.kind === "constructor" || path.node.kind === "set") return;
 
-        const isVoid = path.node.returnType &&
-          t.isVoidTypeAnnotation(path.node.returnType.typeAnnotation);
+          const isVoid = path.node.returnType &&
+            t.isVoidTypeAnnotation(path.node.returnType.typeAnnotation);
 
-        if (!isVoid) {
-          addImplicitReturns(path);
+          if (!isVoid) {
+            addImplicitReturns(path);
+          }
+
+          // somehow this wasn't being done... may signal deeper issues...
+          path.getFunctionParent().scope.registerDeclaration(path);
         }
-
-        // somehow this wasn't being done... may signal deeper issues...
-        path.getFunctionParent().scope.registerDeclaration(path);
       },
 
       IfExpression(path) {
