@@ -292,7 +292,7 @@ export default function (babel) {
     let paths = [];
 
     const add = function add(_path) {
-      if (_path) paths = paths.concat(getTailExpressions(_path));
+      if (_path) paths = paths.concat(getTailExpressions(_path), allowLoops);
     };
 
     if (path.isIfStatement()) {
@@ -324,10 +324,7 @@ export default function (babel) {
 
     const completionRecords = getTailExpressions(path.get("body"));
     for (const targetPath of completionRecords) {
-      // don't implicitly return contents of loops
-      // TODO: add linting to discourage
-      const loop = targetPath.findParent((p) => p.isLoop() && p.getFunctionParent() === path);
-      if (loop || !targetPath.node) continue;
+      if (!targetPath) continue;
 
       if (targetPath.isExpressionStatement()) {
         // TODO: add linting to discourage
