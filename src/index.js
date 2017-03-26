@@ -304,8 +304,6 @@ export default function (babel) {
       add(path.get("body"));
     } else if (path.isProgram() || path.isBlockStatement()) {
       add(path.get("body").pop());
-    // } else if (path.isFunction()) {
-      // return getTailExpressions(path.get("body"));
     } else if (path.isTryStatement()) {
       add(path.get("block"));
       add(path.get("handler"));
