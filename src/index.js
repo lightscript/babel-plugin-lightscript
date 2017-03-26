@@ -783,15 +783,17 @@ export default function (babel) {
         let update = t.updateExpression("++", idx);
 
         // Element initializer: const elem = _array[_i]
+        let assignElemStmt = null;
         if (path.node.elem) {
-          path.scope.push({
-            id: path.node.elem,
-            init: t.memberExpression(refId, idx, true),
-            kind: "const"
-          });
+          // TODO: note that destructuring takes place here for when we add that to the parser.
+          // can probably just pass the destructuring thing to the LHS of the declarator.
+          assignElemStmt = t.variableDeclaration("const", [
+            t.variableDeclarator(path.node.elem, t.memberExpression(refId, idx, true))
+          ]);
         }
 
         ensureBlockBody(path);
+        if (assignElemStmt) path.get("body").unshiftContainer("body", assignElemStmt);
 
         let forNode = t.forStatement(init, test, update, path.node.body);
         path.replaceWith(forNode);
