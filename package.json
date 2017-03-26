@@ -12,7 +12,7 @@
   "homepage": "http://lightscript.org/",
   "license": "MIT",
   "dependencies": {
-    "babylon-lightscript": "^0.4.0"
+    "babylon-lightscript": "^0.4.1"
   },
   "files": [
     "stdlib.js",
