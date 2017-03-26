@@ -791,6 +791,8 @@ export default function (babel) {
           });
         }
 
+        ensureBlockBody(path);
+
         let forNode = t.forStatement(init, test, update, path.node.body);
         path.replaceWith(forNode);
       },
