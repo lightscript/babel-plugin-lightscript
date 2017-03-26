@@ -287,17 +287,42 @@ export default function (babel) {
     return (typeof node.skinny === "boolean");
   }
 
+  // c/p babel-traverse/src/path/family.js getCompletionRecords
+  function getTailExpressions(path, allowLoops) {
+    let paths = [];
+
+    const add = function add(_path) {
+      if (_path) paths = paths.concat(getTailExpressions(_path), allowLoops);
+    };
+
+    if (path.isIfStatement()) {
+      add(path.get("consequent"));
+      add(path.get("alternate"));
+    } else if (path.isDoExpression()) {
+      add(path.get("body"));
+    } else if (allowLoops && (path.isFor() || path.isWhile())) {
+      add(path.get("body"));
+    } else if (path.isProgram() || path.isBlockStatement()) {
+      add(path.get("body").pop());
+    } else if (path.isTryStatement()) {
+      add(path.get("block"));
+      add(path.get("handler"));
+      add(path.get("finalizer"));
+    } else {
+      paths.push(path);
+    }
+
+    return paths;
+  }
+
   // c/p from replaceExpressionWithStatements
 
   function addImplicitReturns(path) {
     path.resync();
 
-    const completionRecords = path.get("body").getCompletionRecords();
+    const completionRecords = getTailExpressions(path.get("body"));
     for (const targetPath of completionRecords) {
-      // don't implicitly return contents of loops
-      // TODO: add linting to discourage
-      const loop = targetPath.findParent((p) => p.isLoop() && p.getFunctionParent() === path);
-      if (loop) continue;
+      if (!targetPath) continue;
 
       if (targetPath.isExpressionStatement()) {
         // TODO: add linting to discourage
@@ -310,6 +335,8 @@ export default function (babel) {
         // TODO: handle declarations.length > 1
         // TODO: add linting to discourage
         targetPath.insertAfter(t.returnStatement(targetPath.node.declarations[0].id));
+      } else if (targetPath.isFunctionDeclaration()) {
+        targetPath.insertAfter(t.returnStatement(targetPath.node.id));
       }
     }
   }
@@ -989,18 +1016,20 @@ export default function (babel) {
         }
       },
 
-      Function(path) {
-        if (path.node.kind === "constructor" || path.node.kind === "set") return;
+      Function: {
+        exit(path) {
+          if (path.node.kind === "constructor" || path.node.kind === "set") return;
 
-        const isVoid = path.node.returnType &&
-          t.isVoidTypeAnnotation(path.node.returnType.typeAnnotation);
+          const isVoid = path.node.returnType &&
+            t.isVoidTypeAnnotation(path.node.returnType.typeAnnotation);
 
-        if (!isVoid) {
-          addImplicitReturns(path);
+          if (!isVoid) {
+            addImplicitReturns(path);
+          }
+
+          // somehow this wasn't being done... may signal deeper issues...
+          path.getFunctionParent().scope.registerDeclaration(path);
         }
-
-        // somehow this wasn't being done... may signal deeper issues...
-        path.getFunctionParent().scope.registerDeclaration(path);
       },
 
       IfExpression(path) {
