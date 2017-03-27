@@ -183,20 +183,68 @@ export default function (babel) {
 
 
   // HELPER FUNCTIONS
+  function isFunctionDeclaration(node) {
+    return node && (t.is("FunctionDeclaration", node) || node.type === "NamedArrowDeclaration");
+  }
 
-  function transformTerminalExpressionsIntoArrPush(path, arrId) {
-    path.resync(); // not sure if this is necessary... c/p from addImplicitReturns
+  function transformTails(path, allowLoops, getNewNode) {
+    path.resync();
 
-    let completionRecords = path.get("body").getCompletionRecords();
-    for (let targetPath of completionRecords) {
-      if (!targetPath.isExpressionStatement()) continue;
+    const tailPaths = getTailExpressions(path.get("body"), allowLoops);
+    for (const tailPath of tailPaths) {
+      if (!tailPath) continue;
 
-      let arrPush = t.callExpression(
-        t.memberExpression(arrId, t.identifier("push")),
-        [targetPath.node.expression]
-      );
-      targetPath.replaceWith(arrPush);
+      if (tailPath.isExpressionStatement()) {
+        // TODO: add linting to discourage
+        if (tailPath.get("expression").isAssignmentExpression()) {
+          tailPath.insertAfter(getNewNode(tailPath.node.expression.left, tailPath));
+        } else {
+          tailPath.replaceWith(getNewNode(tailPath.node.expression, tailPath));
+        }
+      } else if (tailPath.isVariableDeclaration()) {
+        // TODO: handle declarations.length > 1
+        // TODO: add linting to discourage
+        tailPath.insertAfter(getNewNode(tailPath.node.declarations[0].id, tailPath));
+      } else if (isFunctionDeclaration(tailPath.node)) {
+        // Need to transform exprs to statements since this is block context.
+        const nextNode = getNewNode(tailPath.node.id, tailPath);
+        if (t.isExpression(nextNode)) {
+          tailPath.insertAfter(t.expressionStatement(nextNode));
+        } else {
+          tailPath.insertAfter(nextNode);
+        }
+      }
     }
+  }
+
+  function validateComprehensionLoopBody(loopBodyPath) {
+    loopBodyPath.traverse({
+      AwaitExpression(awaitPath) {
+        throw awaitPath.buildCodeFrameError(
+          "`await` is not allowed within Comprehensions; " +
+          "instead, await the Comprehension (eg; `y <- [for x of xs: x]`)."
+        );
+      },
+      YieldExpression(yieldPath) {
+        throw yieldPath.buildCodeFrameError("`yield` is not allowed within Comprehensions.");
+      },
+      ReturnStatement(returnPath) {
+        throw returnPath.buildCodeFrameError("`return` is not allowed within Comprehensions.");
+      },
+    });
+  }
+
+  function wrapComprehensionInIife(bodyVarId, bodyVarInitializer, loopBody) {
+    const fn = t.arrowFunctionExpression([], t.blockStatement([
+      t.variableDeclaration(
+        "const",
+        [t.variableDeclarator(bodyVarId, bodyVarInitializer)]
+      ),
+      loopBody,
+      t.returnStatement(bodyVarId),
+    ]));
+
+    return t.callExpression(fn, []);
   }
 
   function toBlockStatement(body) {
@@ -292,7 +340,7 @@ export default function (babel) {
     let paths = [];
 
     const add = function add(_path) {
-      if (_path) paths = paths.concat(getTailExpressions(_path), allowLoops);
+      if (_path) paths = paths.concat(getTailExpressions(_path, allowLoops));
     };
 
     if (path.isIfStatement()) {
@@ -318,27 +366,7 @@ export default function (babel) {
   // c/p from replaceExpressionWithStatements
 
   function addImplicitReturns(path) {
-    path.resync();
-
-    const completionRecords = getTailExpressions(path.get("body"));
-    for (const targetPath of completionRecords) {
-      if (!targetPath) continue;
-
-      if (targetPath.isExpressionStatement()) {
-        // TODO: add linting to discourage
-        if (targetPath.get("expression").isAssignmentExpression()) {
-          targetPath.insertAfter(t.returnStatement(targetPath.node.expression.left));
-        } else {
-          targetPath.replaceWith(t.returnStatement(targetPath.node.expression));
-        }
-      } else if (targetPath.isVariableDeclaration()) {
-        // TODO: handle declarations.length > 1
-        // TODO: add linting to discourage
-        targetPath.insertAfter(t.returnStatement(targetPath.node.declarations[0].id));
-      } else if (targetPath.isFunctionDeclaration()) {
-        targetPath.insertAfter(t.returnStatement(targetPath.node.id));
-      }
-    }
+    transformTails(path, false, (expr) => t.returnStatement(expr));
   }
 
   function containsSuperCall(path) {
@@ -632,6 +660,16 @@ export default function (babel) {
     },
   });
 
+  definePluginType("ObjectComprehension", {
+    visitor: ["loop"],
+    aliases: ["ObjectExpression", "Expression"],
+    fields: {
+      loop: {
+        validate: assertNodeType("ForStatement"),
+      },
+    },
+  });
+
   definePluginType("TildeCallExpression", {
     visitor: ["left", "right", "arguments"],
     aliases: ["CallExpression", "Expression"],
@@ -697,6 +735,7 @@ export default function (babel) {
     aliases: [
       "Scopable",
       "Function",
+      "FunctionExpression",
       "BlockParent",
       "FunctionParent",
       "Expression",
@@ -883,34 +922,44 @@ export default function (babel) {
       },
 
       ArrayComprehension(path) {
-        // disallow Yield and Return
-        path.get("loop.body").traverse({
-          AwaitExpression(awaitPath) {
-            throw awaitPath.buildCodeFrameError(
-              "`await` is not allowed within Comprehensions; " +
-              "instead, await the Comprehension (eg; `y <- [for x of xs: x]`)."
-            );
-          },
-          YieldExpression(yieldPath) {
-            throw yieldPath.buildCodeFrameError("`yield` is not allowed within Comprehensions.");
-          },
-          ReturnStatement(returnPath) {
-            throw returnPath.buildCodeFrameError("`return` is not allowed within Comprehensions.");
-          },
+        validateComprehensionLoopBody(path.get("loop.body"));
+
+        const id = path.scope.generateUidIdentifier("arr");
+        transformTails(path.get("loop"), true, (expr) =>
+          t.callExpression(
+            t.memberExpression(id, t.identifier("push")),
+            [expr]
+          )
+        );
+
+        path.replaceWith(wrapComprehensionInIife(id, t.arrayExpression(), path.node.loop));
+      },
+
+      ObjectComprehension(path) {
+        validateComprehensionLoopBody(path.get("loop.body"));
+
+        const id = path.scope.generateUidIdentifier("obj");
+        transformTails(path.get("loop"), true, function(seqExpr, tailPath) {
+          // Only SeqExprs of length 2 are valid.
+          if (
+            (seqExpr.type !== "SequenceExpression") ||
+            (seqExpr.expressions.length !== 2)
+          ) {
+            throw tailPath.buildCodeFrameError("Object comprehensions must end" +
+            " with a (key, value) pair.");
+          }
+
+          const keyExpr = seqExpr.expressions[0];
+          const valExpr = seqExpr.expressions[1];
+
+          return t.assignmentExpression(
+            "=",
+            t.memberExpression(id, keyExpr, true),
+            valExpr
+          );
         });
 
-        const arrId = path.scope.generateUidIdentifier("arr");
-
-        transformTerminalExpressionsIntoArrPush(path.get("loop"), arrId);
-
-        const fn = t.arrowFunctionExpression([], t.blockStatement([
-          t.variableDeclaration("const", [t.variableDeclarator(arrId, t.arrayExpression())]),
-          path.node.loop,
-          t.returnStatement(arrId),
-        ]));
-
-        const iife = t.callExpression(fn, []);
-        path.replaceWith(iife);
+        path.replaceWith(wrapComprehensionInIife(id, t.objectExpression([]), path.node.loop));
       },
 
       TildeCallExpression: {
