@@ -1,0 +1,3 @@
+{
+  "throws": "Object comprehensions must end with a (key, value) pair."
+}
