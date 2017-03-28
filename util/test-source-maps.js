@@ -41,9 +41,11 @@ const babelOpts = {
 };
 
 const missingSourceMaps = [];
+const missingSourceMapsByFile = {};
 
 // XXX: get this from a cli arg or something
 let stopAfterErrors = 10;
+let stoppedEarly = false;
 
 const jsFiles = glob.sync("test/fixtures/**/*.js");
 for (const jsFile of jsFiles) {
@@ -68,20 +70,35 @@ for (const jsFile of jsFiles) {
           line,
           column
         };
+
         missingSourceMaps.push(missingSourceMapRecord);
+        missingSourceMapsByFile[jsFile] = missingSourceMapsByFile[jsFile] || [];
+        missingSourceMapsByFile[jsFile].push(missingSourceMapRecord);
       }
     }
   });
 
-  if (missingSourceMaps.length >= stopAfterErrors) break;
+  if (missingSourceMaps.length >= stopAfterErrors) {
+    stoppedEarly = true;
+    break;
+  }
 }
 
 if (missingSourceMaps.length > 0) {
   let errMsg = "";
-  for (const record of missingSourceMaps) {
-    errMsg += `${record.file}: (${record.line}:${record.column}) Missing source map for ${record.node.type} node`;
-    errMsg += "\n";
+  for (const jsFile in missingSourceMapsByFile) {
+    errMsg += `${jsFile}:\n`;
+    for (const record of missingSourceMapsByFile[jsFile]) {
+      errMsg += `(${record.line}:${record.column}) Missing source map for ${record.node.type} node`;
+      errMsg += "\n";
+    }
+    errMsg += "\n\n";
   }
+
+  if (stoppedEarly) {
+    errMsg += "(more...)\n\n"
+  }
+
   process.stderr.write(errMsg);
   process.exit(1);
 } else {
