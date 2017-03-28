@@ -96,7 +96,7 @@ if (missingSourceMaps.length > 0) {
   }
 
   if (stoppedEarly) {
-    errMsg += "(more...)\n\n"
+    errMsg += "(more...)\n\n";
   }
 
   process.stderr.write(errMsg);
