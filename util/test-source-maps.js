@@ -85,7 +85,7 @@ for (const jsFile of jsFiles) {
 }
 
 if (missingSourceMaps.length > 0) {
-  let errMsg = "";
+  let errMsg = "\x1b[31mERROR: Source map information missing:\x1b[0m\n\n";
   for (const jsFile in missingSourceMapsByFile) {
     errMsg += `${jsFile}:\n`;
     for (const record of missingSourceMapsByFile[jsFile]) {
