@@ -183,11 +183,37 @@ export default function (babel) {
 
 
   // HELPER FUNCTIONS
-  function nodeWithSource(sourceNode, type, ...args) {
+  function nodeNowhere(sourceNode, type, ...args) {
+    return t[type](...args);
+  }
+
+  function nodeAt(sourceNode, type, ...args) {
     const newNode = t[type](...args);
     if (sourceNode) {
       newNode.loc = sourceNode.loc;
       newNode.start = sourceNode.start;
+      newNode.end = sourceNode.end;
+    }
+    return newNode;
+  }
+
+  function nodeBefore(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    if (sourceNode) {
+      newNode.loc = Object.assign({}, sourceNode.loc);
+      newNode.loc.end = newNode.loc.start;
+      newNode.start = sourceNode.start;
+      newNode.end = sourceNode.start;
+    }
+    return newNode;
+  }
+
+  function nodeAfter(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    if (sourceNode) {
+      newNode.loc = Object.assign({}, sourceNode.loc);
+      newNode.loc.start = newNode.loc.end;
+      newNode.start = sourceNode.end;
       newNode.end = sourceNode.end;
     }
     return newNode;
@@ -220,7 +246,7 @@ export default function (babel) {
         const nextNode = getNewNode(tailPath.node.id, tailPath);
         if (t.isExpression(nextNode)) {
           tailPath.insertAfter(
-            nodeWithSource(nextNode, "expressionStatement", nextNode)
+            nodeNowhere(nextNode, "expressionStatement", nextNode)
           );
         } else {
           tailPath.insertAfter(nextNode);
@@ -247,29 +273,30 @@ export default function (babel) {
   }
 
   function wrapComprehensionInIife(bodyVarId, bodyVarInitializer, loopBody) {
-    // XXX: until we have lsc, I suggest this pattern for making trees.
-    const n = (...args) => nodeWithSource(loopBody, ...args);
+    const nb = (...args) => nodeBefore(loopBody, ...args);
+    const n = (...args) => nodeAt(loopBody, ...args);
+    const na = (...args) => nodeAfter(loopBody, ...args);
 
     const fn = n("arrowFunctionExpression",
       [],
       n("blockStatement", [
-        n("variableDeclaration",
+        nb("variableDeclaration",
           "const",
-          [n("variableDeclarator", bodyVarId, bodyVarInitializer)]
+          [nb("variableDeclarator", bodyVarId, bodyVarInitializer)]
         ),
         loopBody,
-        n("returnStatement", bodyVarId)
+        na("returnStatement", bodyVarId)
       ]));
 
-    return n("callExpression", fn, []);
+    return nodeAt(loopBody, "callExpression", fn, []);
   }
 
   function toBlockStatement(body) {
     if (!t.isBlockStatement(body)) {
       if (!t.isStatement(body)) {
-        body = nodeWithSource(body, "expressionStatement", body);
+        body = nodeAt(body, "expressionStatement", body);
       }
-      body = nodeWithSource(body, "blockStatement", [body]);
+      body = nodeAt(body, "blockStatement", [body]);
     }
     return body;
   }
@@ -277,13 +304,13 @@ export default function (babel) {
   function ensureBlockBody(path) {
     const body = path.node.body;
     if (!t.isBlockStatement(body)) {
-      path.get("body").replaceWith(nodeWithSource(body, "blockStatement", [body]));
+      path.get("body").replaceWith(nodeAt(body, "blockStatement", [body]));
     }
   }
 
   function toPlainFunction(node) {
     let { id, params, body, generator, async } = node;
-    const n = (...args) => nodeWithSource(node, ...args);
+    const n = (...args) => nodeAt(node, ...args);
 
     body = toBlockStatement(body);
 
@@ -302,13 +329,14 @@ export default function (babel) {
 
   function toArrowFunction(node) {
     let { id, params, body, async } = node;
-    const n = (...args) => nodeWithSource(node, ...args);
+    const nb = (...args) => nodeBefore(node, ...args);
+    const n = (...args) => nodeAt(node, ...args);
 
     if (t.isStatement(node)) {
       let fn = n("arrowFunctionExpression", params, body, async);
       if (node.returnType) fn.returnType = node.returnType;
       if (node.typeParameters) fn.typeParameters = node.typeParameters;
-      return n("variableDeclaration", "const", [n("variableDeclarator", id, fn)]);
+      return nb("variableDeclaration", "const", [nb("variableDeclarator", id, fn)]);
     } else {
       // just throw away the id for now...
       // TODO: think of a way to use it? or outlaw named fat-arrow expressions?
@@ -328,16 +356,18 @@ export default function (babel) {
   function replaceWithBoundFunction(path) {
     const node = path.node;
     const isStatement = t.isStatement(node);
-    const n = (...args) => nodeWithSource(node, ...args);
+    const n = (...args) => nodeAt(node, ...args);
+    const na = (...args) => nodeAfter(node, ...args);
 
     if (isStatement) {
       replaceWithPlainFunction(path);
 
-      const bound = n("callExpression",
-        n("memberExpression", path.node.id, n("identifier", "bind")),
-        [n("thisExpression")]
+      // XXX source maps: all these nodes are going after the base node.
+      const bound = na("callExpression",
+        na("memberExpression", path.node.id, na("identifier", "bind")),
+        [na("thisExpression")]
       );
-      const assignToBound = n("expressionStatement", n("assignmentExpression", "=",
+      const assignToBound = na("expressionStatement", na("assignmentExpression", "=",
         path.node.id,
         bound
       ));
@@ -346,8 +376,8 @@ export default function (babel) {
     } else {
       const unbound = toPlainFunction(path.node);
       const bound = n("callExpression",
-        n("memberExpression", unbound, n("identifier", "bind")),
-        [n("thisExpression")]
+        n("memberExpression", unbound, na("identifier", "bind")),
+        [na("thisExpression")]
       );
       path.replaceWith(bound);
     }
@@ -388,7 +418,7 @@ export default function (babel) {
   function addImplicitReturns(path) {
     transformTails(path, false, (expr, tailPath) => {
       const node = tailPath.node;
-      return nodeWithSource(node, "returnStatement", expr);
+      return nodeBefore(node, "returnStatement", expr);
     });
   }
 
@@ -479,12 +509,9 @@ export default function (babel) {
     }
   }
 
+  // XXX: source mapping issues
   function bindMethods(path, methodIds) {
     let assignId, inExpression = false;
-    // XXX: source mapping -- since we are emplacing these assignment nodes at `path`
-    // I am assuming path.node is the right place for source mapping
-    const node = path.node;
-    const n = (...args) => nodeWithSource(node, ...args);
 
     if (path.isClassDeclaration()) {
       assignId = path.node.id;
@@ -502,6 +529,17 @@ export default function (babel) {
     }
     assertOneOf(assignId, ["Identifier", "MemberExpression"]);
 
+    // XXX: source mapping. if in expression, this will be replacedWith,
+    // otherwise, insertedAfter.
+    let n;
+    if (inExpression) {
+      const node = path.node;
+      n = (...args) => nodeAt(node, ...args);
+    } else {
+      const parentNode = path.getStatementParent().node;
+      n = (...args) => nodeAfter(parentNode, ...args);
+    }
+
     let assignments = methodIds.map((methodId) => {
       // could be computed, eg `['blah']() => {}`
       assertOneOf(methodId, ["Identifier", "Expression"]);
@@ -514,7 +552,6 @@ export default function (babel) {
       return n("assignmentExpression", "=", objDotMethod, bind);
     });
 
-
     if (inExpression) {
       path.replaceWith(n("sequenceExpression", [
         n("assignmentExpression", "=", assignId, path.node),
@@ -523,6 +560,8 @@ export default function (babel) {
       ]));
     } else {
       // XXX: source mapping, maybe getStatementParent() is the right node here?
+      // In this case, we probably need to generate the computed nodes with different
+      // location information...
       path.getStatementParent().insertAfter(
         assignments.map((a) => n("expressionStatement", a))
       );
@@ -532,6 +571,7 @@ export default function (babel) {
   function blockToExpression(path, key) {
     if (t.isBlockStatement(path.node[key])) {
       path.get(key).canSwapBetweenExpressionAndStatement = () => true;
+      // XXX: my money says this doesn't generate source maps properly...
       path.get(key).replaceExpressionWithStatements(path.node[key].body);
     }
   }
@@ -613,7 +653,7 @@ export default function (babel) {
   // guessing path here is just the top of the body which is maybe fine?
   function insertStdlibImports(path, imports: Imports, useRequire) {
     const node = path.node;
-    const n = (...args) => nodeWithSource(node, ...args);
+    const n = (...args) => nodeAt(node, ...args);
 
     const declarations = [];
     for (const importPath in imports) {
@@ -862,14 +902,15 @@ export default function (babel) {
 
       ForInArrayStatement(path) {
         const node = path.node;
-        const n = (...args) => nodeWithSource(node, ...args);
+        const nb = (...args) => nodeBefore(node, ...args);
+        const n = (...args) => nodeAt(node, ...args);
 
         // If array is a complex expression, generate: const _arr = expr
         let refId;
         if (!path.get("array").isIdentifier()) {
           refId = path.scope.generateUidIdentifier("arr");
           path.insertBefore(
-            n("variableDeclaration", "const", [ n("variableDeclarator", refId, path.node.array )])
+            nb("variableDeclaration", "const", [ nb("variableDeclarator", refId, path.node.array )])
           );
         } else {
           refId = path.node.array;
@@ -879,25 +920,25 @@ export default function (babel) {
         let idx = path.node.idx || path.scope.generateUidIdentifier("i");
         let len = path.scope.generateUidIdentifier("len");
         let declarations = [
-          n("variableDeclarator", idx, n("numericLiteral", 0)),
-          n("variableDeclarator",
+          nb("variableDeclarator", idx, nb("numericLiteral", 0)),
+          nb("variableDeclarator",
             len,
-            n("memberExpression", refId, n("identifier", "length"))
+            nb("memberExpression", refId, nb("identifier", "length"))
           )
         ];
-        let init = n("variableDeclaration", "let", declarations);
+        let init = nb("variableDeclaration", "let", declarations);
         // _i < _len
-        let test = n("binaryExpression", "<", idx, len);
+        let test = nb("binaryExpression", "<", idx, len);
         // _i++
-        let update = n("updateExpression", "++", idx);
+        let update = nb("updateExpression", "++", idx);
 
         // Element initializer: const elem = _array[_i]
         let assignElemStmt = null;
         if (path.node.elem) {
           // TODO: note that destructuring takes place here for when we add that to the parser.
           // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignElemStmt = n("variableDeclaration", "const", [
-            n("variableDeclarator", path.node.elem, n("memberExpression", refId, idx, true))
+          assignElemStmt = nb("variableDeclaration", "const", [
+            nb("variableDeclarator", path.node.elem, nb("memberExpression", refId, idx, true))
           ]);
         }
 
@@ -910,7 +951,7 @@ export default function (babel) {
 
       ForInObjectStatement(path) {
         const node = path.node;
-        const n = (...args) => nodeWithSource(node, ...args);
+        const n = (...args) => nodeAt(node, ...args);
         let refId;
 
         // If object is a complex expression, generate: const _obj = expr
@@ -964,7 +1005,7 @@ export default function (babel) {
         const id = path.scope.generateUidIdentifier("arr");
         transformTails(path.get("loop"), true, (expr, tailPath) => {
           const node = tailPath.node;
-          const n = (...args) => nodeWithSource(node, ...args);
+          const n = (...args) => nodeAt(node, ...args);
 
           return n("callExpression",
             n("memberExpression", id, t.identifier("push")),
@@ -975,7 +1016,7 @@ export default function (babel) {
         path.replaceWith(
           wrapComprehensionInIife(
             id,
-            nodeWithSource(path.node, "arrayExpression"),
+            nodeAt(path.node, "arrayExpression"),
             path.node.loop
           )
         );
@@ -996,7 +1037,7 @@ export default function (babel) {
           }
 
           const node = tailPath.node;
-          const n = (...args) => nodeWithSource(node, ...args);
+          const n = (...args) => nodeAt(node, ...args);
           const keyExpr = seqExpr.expressions[0];
           const valExpr = seqExpr.expressions[1];
 
@@ -1010,7 +1051,7 @@ export default function (babel) {
         path.replaceWith(
           wrapComprehensionInIife(
             id,
-            nodeWithSource(path.node, "objectExpression", []),
+            nodeAt(path.node, "objectExpression", []),
             path.node.loop
           )
         );
@@ -1021,7 +1062,7 @@ export default function (babel) {
         // can process differently from a wrapping CallExpression
         // eg; `a?.b~c()` -> `a == null ? null : c(a.b)`
         exit(path) {
-          const callExpr = nodeWithSource(path.node, "callExpression",
+          const callExpr = nodeAt(path.node, "callExpression",
             path.node.right,
             [path.node.left, ...path.node.arguments]
           );
@@ -1044,7 +1085,7 @@ export default function (babel) {
         let object = path.node.object;
         // XXX: direct node mutation, perhaps clone first?
         let node = path.node;
-        const n = (...args) => nodeWithSource(node, ...args);
+        const n = (...args) => nodeAt(node, ...args);
         delete node.object;
         node.type = "NamedArrowExpression";
 
@@ -1146,7 +1187,7 @@ export default function (babel) {
           path.get("alternate").replaceWith(t.nullLiteral());
         }
 
-        path.replaceWith(nodeWithSource(
+        path.replaceWith(nodeAt(
           path.node, "conditionalExpression",
           path.node.test, path.node.consequent, path.node.alternate
         ));
@@ -1170,7 +1211,7 @@ export default function (babel) {
       SafeAwaitExpression(path) {
         const errId = path.scope.generateUidIdentifier("err");
         const node = path.node;
-        const n = (...args) => nodeWithSource(node, ...args);
+        const n = (...args) => nodeAt(node, ...args);
 
         const tryCatch = t.tryStatement(
           t.blockStatement([
@@ -1225,13 +1266,13 @@ export default function (babel) {
         }
 
         // XXX: source map - this node is coming from the tail node
-        const ternary = nodeWithSource(tail.node, "conditionalExpression", nullCheck, t.nullLiteral(), tail.node);
+        const ternary = nodeAt(tail.node, "conditionalExpression", nullCheck, t.nullLiteral(), tail.node);
         tail.replaceWith(ternary);
       },
 
       AwaitExpression(path) {
         if (path.get("argument").isArrayExpression() || path.node.argument.type === "ArrayComprehension") {
-          const promiseDotAllCall = nodeWithSource(path.node, "callExpression",
+          const promiseDotAllCall = nodeAt(path.node, "callExpression",
             t.memberExpression(t.identifier("Promise"), t.identifier("all")),
             [path.node.argument],
           );
