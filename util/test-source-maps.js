@@ -5,11 +5,18 @@
 
 const fs = require("fs");
 const glob = require("glob");
+const path = require("path");
 
 const babel = require("babel-core");
 const babylon_lightscript = require("babylon-lightscript");
 const lightscript = require("babel-plugin-lightscript");
 const traverse = require("babel-traverse").default;
+
+const argv = require("yargs")
+  .usage("Usage: $0 [--stopOnError] [fileGlob]")
+  .boolean("stopOnError")
+  .boolean("errorsOnly")
+  .argv;
 
 const parserOpts = {
   sourceType: "script",
@@ -38,15 +45,9 @@ const parserOpts = {
 
 const babelOpts = {
   plugins: [lightscript],
-  generatorOpts: {
-    retainLines: false,
-    compact: false,
-    concise: false
-  }
 };
 
-function createErrorRecord(file, node, path, nodeIndex) {
-  // Build code frame
+function createErrorRecord(file, node, path, nodeIndex, problem) {
   const codeFrame = path.buildCodeFrameError("missing source map information");
   let column = "unknown", line = "unknown";
   if (codeFrame.loc && codeFrame.loc.start) {
@@ -55,7 +56,7 @@ function createErrorRecord(file, node, path, nodeIndex) {
   }
 
   return {
-    file, node, line, column, nodeIndex
+    file, node, line, column, nodeIndex, problem
   };
 }
 
@@ -76,10 +77,18 @@ function pad(n) {
 
 const fileRecords = [];
 
-const jsFiles = glob.sync(process.argv[2] || "test/fixtures/**/*.js");
+const jsFiles = glob.sync( (argv._ && argv._[0]) || "test/fixtures/**/*.js");
 for (const jsFile of jsFiles) {
   // Skip expected.js fixtures
   if (/expected\.js$/.test(jsFile)) continue;
+  // If there is an expected.js, read it in
+  const pathInfo = path.parse(jsFile);
+  pathInfo.base = "expected.js";
+  const expectedJsPath = path.format(pathInfo);
+  let expected = null;
+  if (fs.existsSync(expectedJsPath)) {
+    expected = fs.readFileSync(expectedJsPath, { encoding: "utf8"});
+  }
 
   const code = fs.readFileSync(jsFile, { encoding: "utf8" });
   let parseTree, ast, transformedCode;
@@ -96,6 +105,7 @@ for (const jsFile of jsFiles) {
   const fileRecord = {
     pathName: jsFile,
     code,
+    expected,
     transformedCode,
     astNodes: [],
     problems: []
@@ -113,35 +123,41 @@ for (const jsFile of jsFiles) {
       if (node) {
         nodeIndex++;
 
+        const problem = (text) => {
+          const errorRecord = createErrorRecord(jsFile, node, path, nodeIndex, text);
+          fileRecord.problems.push(errorRecord);
+        }
+
         // start or end might be zero
         if ( !node.loc ) {
-          errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-          errorRecord.problem = "node.loc is missing.";
+          problem("node.loc is missing.");
         } else if (node.start == null) {
-          errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-          errorRecord.problem = "node.start is missing";
+          problem("node.start is missing");
         } else if (node.end == null) {
-          errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-          errorRecord.problem = "node.end is missing";
-        } else if ( (otherNode = path.getPrevSibling().node) ) {
-          if (otherNode.start && node.start < otherNode.start) {
-            errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-            errorRecord.problem = "Starts before prevSibling starts.";
+          problem("node.end is missing");
+        } else {
+          if ( (otherNode = path.getPrevSibling().node) ) {
+            if (otherNode.start && node.start < otherNode.start) {
+              problem("Starts before prevSibling starts.");
+            }
+
+            if (otherNode.end && node.start < otherNode.end) {
+              problem("Starts before prevSibling ends.");
+            }
           }
 
-          if (otherNode.end && node.start < otherNode.end) {
-            errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-            errorRecord.problem = "Starts before prevSibling ends.";
-          }
-        } else if ( path.parentPath && (otherNode = path.parentPath.node) ) {
-          if (otherNode.start && node.start < otherNode.start) {
-            errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-            errorRecord.problem = "Starts before parent starts.";
-          }
+          if ( path.parentPath && (otherNode = path.parentPath.node) ) {
+            if (otherNode.start && node.start < otherNode.start) {
+              problem("Starts before parent starts.");
+            }
 
-          if (otherNode.start && node.start > otherNode.end) {
-            errorRecord = createErrorRecord(jsFile, node, path, nodeIndex);
-            errorRecord.problem = "Starts after parent ends.";
+            if (otherNode.start && node.end < otherNode.start) {
+              problem("Ends before parent starts.");
+            }
+
+            if (otherNode.start && node.start > otherNode.end) {
+              problem("Starts after parent ends.");
+            }
           }
         }
 
@@ -162,15 +178,26 @@ for (const jsFile of jsFiles) {
   });
 
   fileRecords.push(fileRecord);
+  if (fileRecord.problems.length > 0 && (argv.stopOnError)) break;
 }
 
 let hasError = false;
 for (const fileRecord of fileRecords) {
+  if (fileRecord.problems.length > 0) {
+    hasError = true;
+  } else if (argv.errorsOnly) {
+    continue;
+  }
+
   let msg = `\x1b[33m${fileRecord.pathName}\x1b[0m\n\n`;
   msg += "\x1b[36mSource code:\x1b[0m\n\n";
-  msg += fileRecord.code + "\n\n";
+  msg += fileRecord.code + "\n";
   msg += "\x1b[36mTransformed code:\x1b[0m\n\n";
   msg += fileRecord.transformedCode + "\n\n";
+  if (fileRecord.expected) {
+    msg += "\x1b[36mExpected fixture:\x1b[0m\n\n";
+    msg += fileRecord.expected + "\n";
+  }
   msg += "\x1b[36mAST:\x1b[0m\n\n";
   for (const astNode of fileRecord.astNodes) {
     msg += astNode;
@@ -178,7 +205,6 @@ for (const fileRecord of fileRecords) {
   msg += "\n\n";
 
   if (fileRecord.problems.length > 0) {
-    hasError = true;
     msg += "\x1b[31mERRORS:\x1b[0m\n\n";
     for (const record of fileRecord.problems) {
       msg += `${record.node.type} #${record.nodeIndex} @ ${locate(record.node)}: ${record.problem}`;
