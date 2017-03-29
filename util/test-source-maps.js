@@ -79,6 +79,10 @@ function pad(n) {
 function describe(node) {
   if (node.type === "Identifier") {
     return `\`${node.name}\``;
+  } else if (node.type === "StringLiteral") {
+    return `"${node.value}"`;
+  } else if (node.type === "NumericLiteral") {
+    return `#${node.value}#`;
   } else {
     return node.type;
   }
@@ -179,7 +183,7 @@ for (const jsFile of jsFiles) {
           }
         }
 
-        fileRecord.astNodes.push(formatAstNode(nodeIndex, indent, node))
+        fileRecord.astNodes.push(formatAstNode(nodeIndex, indent, node));
       }
 
       // Add error record
