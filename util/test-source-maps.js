@@ -13,9 +13,10 @@ const lightscript = require("babel-plugin-lightscript");
 const traverse = require("babel-traverse").default;
 
 const argv = require("yargs")
-  .usage("Usage: $0 [--stopOnError] [fileGlob]")
+  .usage("Usage: $0 [fileGlob]")
   .boolean("stopOnError")
   .boolean("errorsOnly")
+  .boolean("errorOnMismatch")
   .argv;
 
 const parserOpts = {
@@ -75,12 +76,29 @@ function pad(n) {
   return ("00" + n).slice(-3);
 }
 
+function describe(node) {
+  if (node.type === "Identifier") {
+    return `\`${node.name}\``;
+  } else {
+    return node.type;
+  }
+}
+
+function formatAstNode(nodeIndex, indent, node) {
+  const indentation = Array((indent * 2) + 1).join(" ");
+  return `${pad(nodeIndex)} ${indentation}${describe(node)}@${locate(node)}\n`;
+}
+
 const fileRecords = [];
 
 const jsFiles = glob.sync( (argv._ && argv._[0]) || "test/fixtures/**/*.js");
 for (const jsFile of jsFiles) {
   // Skip expected.js fixtures
   if (/expected\.js$/.test(jsFile)) continue;
+
+  // Read JS
+  const code = fs.readFileSync(jsFile, { encoding: "utf8" });
+
   // If there is an expected.js, read it in
   const pathInfo = path.parse(jsFile);
   pathInfo.base = "expected.js";
@@ -90,7 +108,6 @@ for (const jsFile of jsFiles) {
     expected = fs.readFileSync(expectedJsPath, { encoding: "utf8"});
   }
 
-  const code = fs.readFileSync(jsFile, { encoding: "utf8" });
   let parseTree, ast, transformedCode;
   try {
     parseTree = babylon_lightscript.parse(code, parserOpts);
@@ -106,6 +123,7 @@ for (const jsFile of jsFiles) {
     pathName: jsFile,
     code,
     expected,
+    matchesExpected: expected && (expected.trim() === transformedCode.trim()),
     transformedCode,
     astNodes: [],
     problems: []
@@ -126,7 +144,7 @@ for (const jsFile of jsFiles) {
         const problem = (text) => {
           const errorRecord = createErrorRecord(jsFile, node, path, nodeIndex, text);
           fileRecord.problems.push(errorRecord);
-        }
+        };
 
         // start or end might be zero
         if ( !node.loc ) {
@@ -161,7 +179,7 @@ for (const jsFile of jsFiles) {
           }
         }
 
-        fileRecord.astNodes.push(`${pad(nodeIndex)} ${Array((indent * 2) + 1).join(" ")}${node.type}@${locate(node)}\n`);
+        fileRecord.astNodes.push(formatAstNode(nodeIndex, indent, node))
       }
 
       // Add error record
@@ -183,7 +201,10 @@ for (const jsFile of jsFiles) {
 
 let hasError = false;
 for (const fileRecord of fileRecords) {
-  if (fileRecord.problems.length > 0) {
+  if (
+    fileRecord.problems.length > 0 ||
+    (argv.errorOnMismatch && !fileRecord.matchesExpected)
+  ) {
     hasError = true;
   } else if (argv.errorsOnly) {
     continue;
@@ -197,6 +218,11 @@ for (const fileRecord of fileRecords) {
   if (fileRecord.expected) {
     msg += "\x1b[36mExpected fixture:\x1b[0m\n\n";
     msg += fileRecord.expected + "\n";
+    if (fileRecord.matchesExpected) {
+      msg += "\x1b[32mMATCH\x1b[0m\n\n";
+    } else {
+      msg += "\x1b[41mMISMATCH\x1b[0m\n\n";
+    }
   }
   msg += "\x1b[36mAST:\x1b[0m\n\n";
   for (const astNode of fileRecord.astNodes) {
@@ -207,7 +233,7 @@ for (const fileRecord of fileRecords) {
   if (fileRecord.problems.length > 0) {
     msg += "\x1b[31mERRORS:\x1b[0m\n\n";
     for (const record of fileRecord.problems) {
-      msg += `${record.node.type} #${record.nodeIndex} @ ${locate(record.node)}: ${record.problem}`;
+      msg += `${describe(record.node)} #${record.nodeIndex} @ ${locate(record.node)}: ${record.problem}`;
       msg += "\n";
     }
   }
