@@ -183,39 +183,63 @@ export default function (babel) {
 
 
   // HELPER FUNCTIONS
-  function nodeNowhere(sourceNode, type, ...args) {
-    return t[type](...args);
-  }
 
-  function nodeAt(sourceNode, type, ...args) {
-    const newNode = t[type](...args);
+  // Source mapping tools
+  function locateAt(newNode, sourceNode) {
     if (sourceNode) {
       newNode.loc = sourceNode.loc;
       newNode.start = sourceNode.start;
       newNode.end = sourceNode.end;
     }
-    return newNode;
   }
 
-  function nodeBefore(sourceNode, type, ...args) {
-    const newNode = t[type](...args);
+  function locateBefore(newNode, sourceNode) {
     if (sourceNode) {
       newNode.loc = Object.assign({}, sourceNode.loc);
       newNode.loc.end = newNode.loc.start;
       newNode.start = sourceNode.start;
       newNode.end = sourceNode.start;
     }
-    return newNode;
   }
 
-  function nodeAfter(sourceNode, type, ...args) {
-    const newNode = t[type](...args);
+  function locateAfter(newNode, sourceNode) {
     if (sourceNode) {
       newNode.loc = Object.assign({}, sourceNode.loc);
       newNode.loc.start = newNode.loc.end;
       newNode.start = sourceNode.end;
       newNode.end = sourceNode.end;
     }
+  }
+
+  function nodeAt(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    locateAt(newNode, sourceNode);
+    return newNode;
+  }
+
+  function nodeBefore(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    locateBefore(newNode, sourceNode);
+    return newNode;
+  }
+
+  function nodeAfter(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    locateAfter(newNode, sourceNode);
+    return newNode;
+  }
+
+  function cloneBefore(sourceNode, node) {
+    if (!node) return node; // undef/null
+    const newNode = t.clone(node);
+    locateBefore(newNode, sourceNode);
+    return newNode;
+  }
+
+  function cloneAfter(sourceNode, node) {
+    if (!node) return node; // undef/null
+    const newNode = t.clone(node);
+    locateAfter(newNode, sourceNode);
     return newNode;
   }
 
@@ -246,7 +270,7 @@ export default function (babel) {
         const nextNode = getNewNode(tailPath.node.id, tailPath);
         if (t.isExpression(nextNode)) {
           tailPath.insertAfter(
-            nodeNowhere(nextNode, "expressionStatement", nextNode)
+            nodeAt(nextNode, "expressionStatement", nextNode)
           );
         } else {
           tailPath.insertAfter(nextNode);
@@ -329,14 +353,13 @@ export default function (babel) {
 
   function toArrowFunction(node) {
     let { id, params, body, async } = node;
-    const nb = (...args) => nodeBefore(node, ...args);
     const n = (...args) => nodeAt(node, ...args);
 
     if (t.isStatement(node)) {
       let fn = n("arrowFunctionExpression", params, body, async);
       if (node.returnType) fn.returnType = node.returnType;
       if (node.typeParameters) fn.typeParameters = node.typeParameters;
-      return nb("variableDeclaration", "const", [nb("variableDeclarator", id, fn)]);
+      return n("variableDeclaration", "const", [n("variableDeclarator", id, fn)]);
     } else {
       // just throw away the id for now...
       // TODO: think of a way to use it? or outlaw named fat-arrow expressions?
@@ -436,17 +459,17 @@ export default function (babel) {
   }
 
   // XXX: source mapping issues
-  function ensureConstructorWithSuper(path, constructorPath) {
-    path.resync(); // uhh, just in case?
-    let { node } = path;
+  function ensureConstructorWithSuper(classDeclarationPath, constructorPath) {
+    classDeclarationPath.resync(); // uhh, just in case?
+    let { node } = classDeclarationPath;
 
     // add empty constructor if it wasn't there
     if (!constructorPath) {
       let emptyConstructor = t.classMethod("constructor", t.identifier("constructor"),
         [], t.blockStatement([]));
       emptyConstructor.skinny = true; // mark for super insertion
-      path.get("body").unshiftContainer("body", emptyConstructor);
-      constructorPath = path.get("body.body.0.body");
+      classDeclarationPath.get("body").unshiftContainer("body", emptyConstructor);
+      constructorPath = classDeclarationPath.get("body.body.0.body");
     }
 
     // add super if it wasn't there (unless defined with curly braces)
@@ -456,7 +479,7 @@ export default function (babel) {
         const params = constructorPath.parentPath.node.params;
         superCall = t.expressionStatement(t.callExpression(t.super(), params));
       } else {
-        let argsUid = path.scope.generateUidIdentifier("args");
+        let argsUid = classDeclarationPath.scope.generateUidIdentifier("args");
         let params = [t.restElement(argsUid)];
         superCall = t.expressionStatement(t.callExpression(t.super(), [t.spreadElement(argsUid)]));
         constructorPath.parentPath.node.params = params;
@@ -531,37 +554,41 @@ export default function (babel) {
 
     // XXX: source mapping. if in expression, this will be replacedWith,
     // otherwise, insertedAfter.
-    let n;
+    let n, c;
     if (inExpression) {
       const node = path.node;
       n = (...args) => nodeAt(node, ...args);
+      c = (x) => x; // XXX: wrong.
     } else {
       const parentNode = path.getStatementParent().node;
       n = (...args) => nodeAfter(parentNode, ...args);
+      c = (...args) => cloneAfter(parentNode, ...args);
     }
 
     let assignments = methodIds.map((methodId) => {
       // could be computed, eg `['blah']() => {}`
       assertOneOf(methodId, ["Identifier", "Expression"]);
       let isComputed = !t.isIdentifier(methodId);
-      let objDotMethod = n("memberExpression", assignId, methodId, isComputed);
+      let objDotMethod = n("memberExpression", c(assignId), c(methodId), isComputed);
       let bind = n("callExpression",
         n("memberExpression", objDotMethod, n("identifier", "bind")),
-        [assignId]
+        [c(assignId)]
       );
       return n("assignmentExpression", "=", objDotMethod, bind);
     });
 
     if (inExpression) {
+      // XXX: sourcemap: this could be wrong. we have to pick one expression
+      // (the first one, maybe) to emplace at the node, then the rest
+      // should be emplaced before/after
       path.replaceWith(n("sequenceExpression", [
-        n("assignmentExpression", "=", assignId, path.node),
+        n("assignmentExpression", "=", c(assignId), path.node),
         ...assignments,
-        assignId
+        c(assignId)
       ]));
     } else {
-      // XXX: source mapping, maybe getStatementParent() is the right node here?
-      // In this case, we probably need to generate the computed nodes with different
-      // location information...
+      // XXX: sourcemap: this one is ok I think, since n = parent.nodeAfter and they
+      // are all being insertedAfter.
       path.getStatementParent().insertAfter(
         assignments.map((a) => n("expressionStatement", a))
       );
@@ -572,6 +599,7 @@ export default function (babel) {
     if (t.isBlockStatement(path.node[key])) {
       path.get(key).canSwapBetweenExpressionAndStatement = () => true;
       // XXX: my money says this doesn't generate source maps properly...
+      // check where this is being used and diagnose fixtures...
       path.get(key).replaceExpressionWithStatements(path.node[key].body);
     }
   }
@@ -1062,6 +1090,9 @@ export default function (babel) {
         // can process differently from a wrapping CallExpression
         // eg; `a?.b~c()` -> `a == null ? null : c(a.b)`
         exit(path) {
+          // XXX: this might be breaking source maps because it makes impossible
+          // ordering, right appears after left in original source but before
+          // in transpiled source...
           const callExpr = nodeAt(path.node, "callExpression",
             path.node.right,
             [path.node.left, ...path.node.arguments]
