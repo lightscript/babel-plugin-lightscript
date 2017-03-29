@@ -1,5 +1,5 @@
 f() ->
-  for now x of []:
+  for const x of []:
     if 0:
       0
     else if 1:
