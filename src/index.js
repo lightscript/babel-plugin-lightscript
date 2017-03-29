@@ -958,15 +958,6 @@ export default function (babel) {
         path.replaceWith(forNode);
       },
 
-      // XXX source mapping - this is being removed
-      // `for x in` --> `for const x in`
-      // `for x of` --> `for const x of`
-      "ForInStatement|ForOfStatement"(path) {
-        if (!t.isVariableDeclaration(path.node.left)) {
-          path.node.left = t.variableDeclaration("const", [t.variableDeclarator(path.node.left)]);
-        }
-      },
-
       ArrayComprehension(path) {
         validateComprehensionLoopBody(path.get("loop.body"));
 
