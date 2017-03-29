@@ -3,7 +3,6 @@ class A extends B {
     super(..._args);
     this.f = this.f.bind(this);
   }
-
   f() {
     return this;
   }
