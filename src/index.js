@@ -1303,24 +1303,31 @@ export default function (babel) {
         path.replaceWith(awaitExpr);
       },
 
+      // XXX: source mapping issues here.
       SafeMemberExpression(path) {
         // x?.y -> x == null ? x : x.y
         // x?[y] -> x == null ? x : x[y]
         const { node } = path;
         const { object } = node;
 
+        // Convert to ordinary member expression
+        node.type = "MemberExpression";
+        path.replaceWith(node);
+
+        // Generate null check
+        // XXX: sourcemap - treating this all as implicit code that comes before
+        // the member expr. possibly wrong, if the null check crashes maybe that
+        // should point at the node.object?
+        const nb = (...args) => nodeBefore(node, ...args);
         let left;
         if (object.type === "Identifier" || object.type === "SafeMemberExpression") {
           left = object;
         } else {
-          const ref = path.scope.generateDeclaredUidIdentifier("ref");
+          const ref = locateBefore(path.scope.generateDeclaredUidIdentifier("ref"), node);
           node.object = ref;
-          left = t.assignmentExpression("=", ref, object);
+          left = nb("assignmentExpression", "=", ref, object);
         }
-
-        const nullCheck = t.binaryExpression("==", left, t.nullLiteral());
-        node.type = "MemberExpression";
-        path.replaceWith(node);
+        const nullCheck = nb("binaryExpression", "==", left, nb("nullLiteral"));
 
         // Gather trailing subscripts/calls, which are parent nodes:
         // eg; in `o?.x.y()`, group trailing `.x.y()` into the ternary
@@ -1340,8 +1347,13 @@ export default function (babel) {
           }
         }
 
-        // XXX: source map - this node is coming from the tail node
-        const ternary = nodeAt(tail.node, "conditionalExpression", nullCheck, t.nullLiteral(), tail.node);
+        // XXX: source map - treating this as all coming from the tail node.
+        // again possibly wrong, difficult to see the possibilities
+        const ternary = nodeAt(tail.node, "conditionalExpression",
+          nullCheck,
+          nodeBefore(tail.node, "nullLiteral"),
+          tail.node
+        );
         tail.replaceWith(ternary);
       },
 
