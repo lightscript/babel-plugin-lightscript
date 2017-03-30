@@ -3,6 +3,9 @@
   "version": "0.4.2",
   "description": "Compile LightScript to JavaScript.",
   "main": "index.js",
+  "engines": {
+    "node": ">=4"
+  },
   "scripts": {
     "test": "mocha test",
     "test:debug": "node --inspect --debug-brk mocha test",
