@@ -94,6 +94,7 @@ function formatAstNode(nodeIndex, indent, node) {
 }
 
 const fileRecords = [];
+let errors = 0;
 
 const jsFiles = glob.sync( (argv._ && argv._[0]) || "test/fixtures/**/*.js");
 for (const jsFile of jsFiles) {
@@ -103,13 +104,16 @@ for (const jsFile of jsFiles) {
   // Read JS
   const code = fs.readFileSync(jsFile, { encoding: "utf8" });
 
-  // If there is an expected.js, read it in
-  const pathInfo = path.parse(jsFile);
-  pathInfo.base = "expected.js";
-  const expectedJsPath = path.format(pathInfo);
+  // If I am an actual.js...
   let expected = null;
-  if (fs.existsSync(expectedJsPath)) {
-    expected = fs.readFileSync(expectedJsPath, { encoding: "utf8"});
+  if (/actual\.js$/.test(jsFile)) {
+    // If there is an expected.js, read it in
+    const pathInfo = path.parse(jsFile);
+    pathInfo.base = "expected.js";
+    const expectedJsPath = path.format(pathInfo);
+    if (fs.existsSync(expectedJsPath)) {
+      expected = fs.readFileSync(expectedJsPath, { encoding: "utf8"});
+    }
   }
 
   let parseTree, ast, transformedCode;
@@ -119,8 +123,12 @@ for (const jsFile of jsFiles) {
     ast = result.ast;
     transformedCode = result.code;
   } catch (err) {
-    // Assume babel errors are intentional
-    continue;
+    // If compiling multiple files, Assume babel errors are intentional
+    if (jsFiles.length === 1) {
+      throw (err);
+    } else {
+      continue;
+    }
   }
 
   const fileRecord = {
@@ -145,40 +153,54 @@ for (const jsFile of jsFiles) {
       if (node) {
         nodeIndex++;
 
-        const problem = (text) => {
+        const problem = (type, text) => {
           const errorRecord = createErrorRecord(jsFile, node, path, nodeIndex, text);
+          errorRecord.type = type;
+          if (type === "error") errors++;
           fileRecord.problems.push(errorRecord);
         };
 
         // start or end might be zero
         if ( !node.loc ) {
-          problem("node.loc is missing.");
+          problem("error", "node.loc is missing.");
         } else if (node.start == null) {
-          problem("node.start is missing");
+          problem("error", "node.start is missing");
         } else if (node.end == null) {
-          problem("node.end is missing");
+          problem("error", "node.end is missing");
         } else {
           if ( (otherNode = path.getPrevSibling().node) ) {
             if (otherNode.start && node.start < otherNode.start) {
-              problem("Starts before prevSibling starts.");
+              problem("order", "Starts before prevSibling starts.");
             }
 
             if (otherNode.end && node.start < otherNode.end) {
-              problem("Starts before prevSibling ends.");
+              problem("order", "Starts before prevSibling ends.");
             }
           }
 
           if ( path.parentPath && (otherNode = path.parentPath.node) ) {
             if (otherNode.start && node.start < otherNode.start) {
-              problem("Starts before parent starts.");
+              // If parent is a MemberExpression, this is okay, because
+              // babylon makes member expressions point at the ".y"
+              // part of "x.y"
+              if (otherNode.type !== "MemberExpression") {
+                problem("order", "Starts before parent starts.");
+              }
             }
 
             if (otherNode.start && node.end < otherNode.start) {
-              problem("Ends before parent starts.");
+              problem("order", "Ends before parent starts.");
             }
 
-            if (otherNode.start && node.start > otherNode.end) {
-              problem("Starts after parent ends.");
+            if (otherNode.end && node.start > otherNode.end) {
+              problem("order", "Starts after parent ends.");
+            }
+
+            if (otherNode.end && node.end > otherNode.end) {
+              // ReturnStatements come before the expr they return.
+              if (otherNode.type !== "ReturnStatement") {
+                problem("order", "Ends after parent ends.");
+              }
             }
           }
         }
@@ -199,22 +221,26 @@ for (const jsFile of jsFiles) {
     }
   });
 
+  if (argv.errorOnMismatch && fileRecord.expected && !fileRecord.matchesExpected) {
+    fileRecord.problems.push({
+      type: "error",
+      msg: "Test fixture output mismatch."
+    });
+    errors++;
+  }
+
   fileRecords.push(fileRecord);
-  if (fileRecord.problems.length > 0 && (argv.stopOnError)) break;
+  if (errors > 0 && (argv.stopOnError)) break;
 }
 
-let hasError = false;
 for (const fileRecord of fileRecords) {
   if (
-    fileRecord.problems.length > 0 ||
-    (argv.errorOnMismatch && !fileRecord.matchesExpected)
+    argv.errorsOnly && !fileRecord.problems.find( (x) => x.type === "error" )
   ) {
-    hasError = true;
-  } else if (argv.errorsOnly) {
     continue;
   }
 
-  let msg = `\x1b[33m${fileRecord.pathName}\x1b[0m\n\n`;
+  let msg = `\n\x1b[33m------\n${fileRecord.pathName}\n------\x1b[0m\n\n`;
   msg += "\x1b[36mSource code:\x1b[0m\n\n";
   msg += fileRecord.code + "\n";
   msg += "\x1b[36mTransformed code:\x1b[0m\n\n";
@@ -235,18 +261,18 @@ for (const fileRecord of fileRecords) {
   msg += "\n\n";
 
   if (fileRecord.problems.length > 0) {
-    msg += "\x1b[31mERRORS:\x1b[0m\n\n";
+    msg += "\x1b[31mPROBLEMS:\x1b[0m\n\n";
     for (const record of fileRecord.problems) {
-      msg += `${describe(record.node)} #${record.nodeIndex} @ ${locate(record.node)}: ${record.problem}`;
-      msg += "\n";
+      if (record.msg) {
+        msg += `${record.type}: ${record.msg}\n`;
+      } else {
+        msg += `${record.type}: ${describe(record.node)} #${record.nodeIndex} @ ${locate(record.node)}: ${record.problem}`;
+        msg += "\n";
+      }
     }
   }
 
   process.stdout.write(msg);
 }
 
-if (hasError) {
-  process.exit(1);
-} else {
-  process.exit(0);
-}
+process.exit(errors);
