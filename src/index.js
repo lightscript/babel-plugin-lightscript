@@ -183,6 +183,87 @@ export default function (babel) {
 
 
   // HELPER FUNCTIONS
+
+  // Source mapping tools
+  function locateAt(newNode, sourceNode) {
+    if (sourceNode) {
+      newNode.loc = sourceNode.loc;
+      newNode.start = sourceNode.start;
+      newNode.end = sourceNode.end;
+    }
+    return newNode;
+  }
+
+  function locateBefore(newNode, sourceNode) {
+    if (sourceNode) {
+      newNode.loc = Object.assign({}, sourceNode.loc);
+      newNode.loc.end = newNode.loc.start;
+      newNode.start = sourceNode.start;
+      newNode.end = sourceNode.start;
+    }
+    return newNode;
+  }
+
+  function locateAfter(newNode, sourceNode) {
+    if (sourceNode) {
+      newNode.loc = Object.assign({}, sourceNode.loc);
+      newNode.loc.start = newNode.loc.end;
+      newNode.start = sourceNode.end;
+      newNode.end = sourceNode.end;
+    }
+    return newNode;
+  }
+
+  function nodeAt(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    return locateAt(newNode, sourceNode);
+  }
+
+  function nodeBefore(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    return locateBefore(newNode, sourceNode);
+  }
+
+  function nodeAfter(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    return locateAfter(newNode, sourceNode);
+  }
+
+  function cloneAt(sourceNode, node) {
+    if (!node) return node; // undef/null
+    const newNode = t.clone(node);
+    return locateAt(newNode, sourceNode);
+  }
+
+  function cloneBefore(sourceNode, node) {
+    if (!node) return node; // undef/null
+    const newNode = t.clone(node);
+    return locateBefore(newNode, sourceNode);
+  }
+
+  function cloneAfter(sourceNode, node) {
+    if (!node) return node; // undef/null
+    const newNode = t.clone(node);
+    return locateAfter(newNode, sourceNode);
+  }
+
+  // Traverse node structures that are not yet attached to the AST body
+  // Algorithm from babel-types/src/index.js#286
+  function traverseNodes(rootNode, visitor) {
+    visitor(rootNode);
+    for (const key in rootNode) {
+      if (key[0] === "_") continue;
+      let val = rootNode[key];
+      if (val) {
+        if (val.type) {
+          traverseNodes(val, visitor);
+        } else if (Array.isArray(val)) {
+          val.forEach( (x) => traverseNodes(x, visitor) );
+        }
+      }
+    }
+  }
+
   function isFunctionDeclaration(node) {
     return node && (t.is("FunctionDeclaration", node) || node.type === "NamedArrowDeclaration");
   }
@@ -209,7 +290,9 @@ export default function (babel) {
         // Need to transform exprs to statements since this is block context.
         const nextNode = getNewNode(tailPath.node.id, tailPath);
         if (t.isExpression(nextNode)) {
-          tailPath.insertAfter(t.expressionStatement(nextNode));
+          tailPath.insertAfter(
+            nodeAt(nextNode, "expressionStatement", nextNode)
+          );
         } else {
           tailPath.insertAfter(nextNode);
         }
@@ -235,42 +318,50 @@ export default function (babel) {
   }
 
   function wrapComprehensionInIife(bodyVarId, bodyVarInitializer, loopBody) {
-    const fn = t.arrowFunctionExpression([], t.blockStatement([
-      t.variableDeclaration(
-        "const",
-        [t.variableDeclarator(bodyVarId, bodyVarInitializer)]
-      ),
-      loopBody,
-      t.returnStatement(bodyVarId),
-    ]));
+    const nb = (...args) => nodeBefore(loopBody, ...args);
+    const n = (...args) => nodeAt(loopBody, ...args);
+    const na = (...args) => nodeAfter(loopBody, ...args);
 
-    return t.callExpression(fn, []);
+    const fn = n("arrowFunctionExpression",
+      [],
+      n("blockStatement", [
+        nb("variableDeclaration",
+          "const",
+          [nb("variableDeclarator", bodyVarId, bodyVarInitializer)]
+        ),
+        loopBody,
+        na("returnStatement", bodyVarId)
+      ]));
+
+    return nodeAt(loopBody, "callExpression", fn, []);
   }
 
   function toBlockStatement(body) {
     if (!t.isBlockStatement(body)) {
       if (!t.isStatement(body)) {
-        body = t.expressionStatement(body);
+        body = nodeAt(body, "expressionStatement", body);
       }
-      body = t.blockStatement([body]);
+      body = nodeAt(body, "blockStatement", [body]);
     }
     return body;
   }
 
   function ensureBlockBody(path) {
-    if (!t.isBlockStatement(path.node.body)) {
-      path.get("body").replaceWith(t.blockStatement([path.node.body]));
+    const body = path.node.body;
+    if (!t.isBlockStatement(body)) {
+      path.get("body").replaceWith(nodeAt(body, "blockStatement", [body]));
     }
   }
 
   function toPlainFunction(node) {
     let { id, params, body, generator, async } = node;
+    const n = (...args) => nodeAt(node, ...args);
 
     body = toBlockStatement(body);
 
     const fn = t.isStatement(node)
-      ? t.functionDeclaration(id, params, body, generator, async)
-      : t.functionExpression(id, params, body, generator, async);
+      ? n("functionDeclaration", id, params, body, generator, async)
+      : n("functionExpression", id, params, body, generator, async);
 
     if (node.returnType) fn.returnType = node.returnType;
     if (node.typeParameters) fn.typeParameters = node.typeParameters;
@@ -283,16 +374,17 @@ export default function (babel) {
 
   function toArrowFunction(node) {
     let { id, params, body, async } = node;
+    const n = (...args) => nodeAt(node, ...args);
 
     if (t.isStatement(node)) {
-      let fn = t.arrowFunctionExpression(params, body, async);
+      let fn = n("arrowFunctionExpression", params, body, async);
       if (node.returnType) fn.returnType = node.returnType;
       if (node.typeParameters) fn.typeParameters = node.typeParameters;
-      return t.variableDeclaration("const", [t.variableDeclarator(id, fn)]);
+      return n("variableDeclaration", "const", [n("variableDeclarator", id, fn)]);
     } else {
       // just throw away the id for now...
       // TODO: think of a way to use it? or outlaw named fat-arrow expressions?
-      let fn = t.arrowFunctionExpression(params, body, async);
+      let fn = n("arrowFunctionExpression", params, body, async);
       if (node.returnType) fn.returnType = node.returnType;
       if (node.typeParameters) fn.typeParameters = node.typeParameters;
       return fn;
@@ -306,16 +398,19 @@ export default function (babel) {
   }
 
   function replaceWithBoundFunction(path) {
-    const isStatement = t.isStatement(path.node);
+    const node = path.node;
+    const isStatement = t.isStatement(node);
+    const n = (...args) => nodeAt(node, ...args);
+    const na = (...args) => nodeAfter(node, ...args);
 
     if (isStatement) {
       replaceWithPlainFunction(path);
 
-      const bound = t.callExpression(
-        t.memberExpression(path.node.id, t.identifier("bind")),
-        [t.thisExpression()]
+      const bound = na("callExpression",
+        na("memberExpression", path.node.id, na("identifier", "bind")),
+        [na("thisExpression")]
       );
-      const assignToBound = t.expressionStatement(t.assignmentExpression("=",
+      const assignToBound = na("expressionStatement", na("assignmentExpression", "=",
         path.node.id,
         bound
       ));
@@ -323,9 +418,9 @@ export default function (babel) {
       path.insertAfter(assignToBound);
     } else {
       const unbound = toPlainFunction(path.node);
-      const bound = t.callExpression(
-        t.memberExpression(unbound, t.identifier("bind")),
-        [t.thisExpression()]
+      const bound = n("callExpression",
+        n("memberExpression", unbound, na("identifier", "bind")),
+        [na("thisExpression")]
       );
       path.replaceWith(bound);
     }
@@ -363,10 +458,10 @@ export default function (babel) {
     return paths;
   }
 
-  // c/p from replaceExpressionWithStatements
-
   function addImplicitReturns(path) {
-    transformTails(path, false, (expr) => t.returnStatement(expr));
+    transformTails(path, false, (expr, tailPath) => {
+      return nodeBefore(tailPath.node, "returnStatement", expr);
+    });
   }
 
   function containsSuperCall(path) {
@@ -382,29 +477,44 @@ export default function (babel) {
     return hasSuper;
   }
 
-  function ensureConstructorWithSuper(path, constructorPath) {
-    path.resync(); // uhh, just in case?
-    let { node } = path;
+  function ensureConstructorWithSuper(classDeclarationPath, constructorPath) {
+    classDeclarationPath.resync(); // uhh, just in case?
+    let { node } = classDeclarationPath;
+
+    const classBodyPath = classDeclarationPath.get("body");
+    const classBodyNode = classBodyPath.node;
 
     // add empty constructor if it wasn't there
     if (!constructorPath) {
-      let emptyConstructor = t.classMethod("constructor", t.identifier("constructor"),
-        [], t.blockStatement([]));
+      // constructor goes before class body in sourcemap
+      const n = (...args) => nodeBefore(classBodyNode, ...args);
+      let emptyConstructor = n(
+        "classMethod", "constructor",
+        n("identifier", "constructor"),
+        [],
+        n("blockStatement", [])
+      );
       emptyConstructor.skinny = true; // mark for super insertion
-      path.get("body").unshiftContainer("body", emptyConstructor);
-      constructorPath = path.get("body.body.0.body");
+      classBodyPath.unshiftContainer("body", emptyConstructor);
+      constructorPath = classBodyPath.get("body.0.body");
     }
 
     // add super if it wasn't there (unless defined with curly braces)
     if (node.superClass && constructorPath.parentPath.node.skinny && !containsSuperCall(constructorPath)) {
+      // All this stuff is going to be at the beginning of the constructor...
+      const constructorNode = constructorPath.node;
+      const n = (...args) => nodeBefore(constructorNode, ...args);
+
       let superCall;
       if (constructorPath.parentPath.node.params.length) {
         const params = constructorPath.parentPath.node.params;
-        superCall = t.expressionStatement(t.callExpression(t.super(), params));
+        superCall = n("expressionStatement", n("callExpression", n("super"), params));
       } else {
-        let argsUid = path.scope.generateUidIdentifier("args");
-        let params = [t.restElement(argsUid)];
-        superCall = t.expressionStatement(t.callExpression(t.super(), [t.spreadElement(argsUid)]));
+        let argsUid = locateBefore(classDeclarationPath.scope.generateUidIdentifier("args"), constructorNode);
+        let params = [n("restElement", argsUid)];
+        superCall = n("expressionStatement",
+          n("callExpression", n("super"), [n("spreadElement", argsUid)])
+        );
         constructorPath.parentPath.node.params = params;
       }
       constructorPath.unshiftContainer("body", superCall);
@@ -413,22 +523,26 @@ export default function (babel) {
     return constructorPath;
   }
 
-  function bindMethodsInConstructor(path, constructorPath, methodIds) {
-    path.resync(); // uhh, just in case?
-    let { node } = path;
+  // XXX: source mapping issues.
+  function bindMethodsInConstructor(classDeclarationPath, constructorPath, methodIds) {
+    classDeclarationPath.resync(); // uhh, just in case?
+    let { node } = classDeclarationPath;
 
-    // `this.method = this.method.bind(this);`
-    let assignments = methodIds.map((methodId) => {
-      assertOneOf(methodId, ["Identifier", "Expression"]);
+    // XXX: Source mapping: we have to make different nodes for each insertion
+    // we do because they will appear in different source positions.
+    const emplacedAssignments = (n, c) => {
+      return methodIds.map((methodId) => {
+        assertOneOf(methodId, ["Identifier", "Expression"]);
 
-      let isComputed = !t.isIdentifier(methodId);
-      let thisDotMethod = t.memberExpression(t.thisExpression(), methodId, isComputed);
-      let bind = t.callExpression(
-        t.memberExpression(thisDotMethod, t.identifier("bind")),
-        [t.thisExpression()]
-      );
-      return t.expressionStatement(t.assignmentExpression("=", thisDotMethod, bind));
-    });
+        let isComputed = !t.isIdentifier(methodId);
+        let thisDotMethod = n("memberExpression", n("thisExpression"), c(methodId), isComputed);
+        let bind = n("callExpression",
+          n("memberExpression", thisDotMethod, n("identifier", "bind")),
+          [n("thisExpression")]
+        );
+        return n("expressionStatement", n("assignmentExpression", "=", thisDotMethod, bind));
+      });
+    };
 
     // directly after each instance of super(), insert the thingies there.
     if (node.superClass) {
@@ -443,16 +557,26 @@ export default function (babel) {
             .findParent((p) => p.isReturnStatement() && p.getFunctionParent() === constructorPath.parentPath);
           if (enclosingReturn) throw new Error("Can't use => with `return super()`; try removing `return`.");
 
-          superStatementPath.insertAfter(assignments);
+          // `this.method = this.method.bind(this);`
+          const targetNode = superStatementPath.node;
+          const n = (...args) => nodeAfter(targetNode, ...args);
+          const c = (node) => cloneAfter(targetNode, node);
+          superStatementPath.insertAfter(emplacedAssignments(n, c));
         }
       });
     } else {
-      constructorPath.unshiftContainer("body", assignments);
+      const targetNode = constructorPath.node; // XXX: is this right?
+      const n = (...args) => nodeBefore(targetNode, ...args);
+      const c = (node) => cloneBefore(targetNode, node);
+      constructorPath.unshiftContainer("body", emplacedAssignments(n, c));
     }
   }
 
+  // XXX: source mapping issues
   function bindMethods(path, methodIds) {
     let assignId, inExpression = false;
+    let parentNode = path.getStatementParent().node;
+
     if (path.isClassDeclaration()) {
       assignId = path.node.id;
     } else if (
@@ -464,32 +588,48 @@ export default function (babel) {
       assignId = path.parentPath.node.id;
     } else {
       let id = path.isClass() ? "class" : "obj";
+      parentNode = path.node;
+      // XXX: source maps: this generates a node with no source map
       assignId = path.getStatementParent().scope.generateDeclaredUidIdentifier(id);
       inExpression = true;
     }
     assertOneOf(assignId, ["Identifier", "MemberExpression"]);
 
+    // XXX: source mapping. if in expression, this will be replacedWith,
+    // otherwise, insertedAfter.
+    let n;
+    if (inExpression) {
+      n = (...args) => nodeAt(parentNode, ...args);
+    } else {
+      n = (...args) => nodeAfter(parentNode, ...args);
+    }
+
     let assignments = methodIds.map((methodId) => {
       // could be computed, eg `['blah']() => {}`
       assertOneOf(methodId, ["Identifier", "Expression"]);
       let isComputed = !t.isIdentifier(methodId);
-      let objDotMethod = t.memberExpression(assignId, methodId, isComputed);
-      let bind = t.callExpression(
-        t.memberExpression(objDotMethod, t.identifier("bind")),
+      let objDotMethod = n("memberExpression", assignId, methodId, isComputed);
+      let bind = n("callExpression",
+        n("memberExpression", objDotMethod, n("identifier", "bind")),
         [assignId]
       );
-      return t.assignmentExpression("=", objDotMethod, bind);
+      return n("assignmentExpression", "=", objDotMethod, bind);
     });
 
     if (inExpression) {
-      path.replaceWith(t.sequenceExpression([
-        t.assignmentExpression("=", assignId, path.node),
+      // XXX: sourcemap: this could be wrong. we have to pick one expression
+      // (the first one, maybe) to emplace at the node, then the rest
+      // should be emplaced before/after
+      path.replaceWith(n("sequenceExpression", [
+        n("assignmentExpression", "=", assignId, path.node),
         ...assignments,
         assignId
       ]));
     } else {
+      // XXX: sourcemap: this one is ok I think, since n = parent.nodeAfter and they
+      // are all being insertedAfter.
       path.getStatementParent().insertAfter(
-        assignments.map((a) => t.expressionStatement(a))
+        assignments.map((a) => n("expressionStatement", a))
       );
     }
   }
@@ -497,6 +637,8 @@ export default function (babel) {
   function blockToExpression(path, key) {
     if (t.isBlockStatement(path.node[key])) {
       path.get(key).canSwapBetweenExpressionAndStatement = () => true;
+      // XXX: my money says this doesn't generate source maps properly...
+      // check where this is being used and diagnose fixtures...
       path.get(key).replaceExpressionWithStatements(path.node[key].body);
     }
   }
@@ -574,7 +716,12 @@ export default function (babel) {
     }
   }
 
+  // XXX: source mapping for inserted imports? not sure how to handle.
+  // guessing path here is just the top of the body which is maybe fine?
   function insertStdlibImports(path, imports: Imports, useRequire) {
+    const node = path.node;
+    const n = (...args) => nodeBefore(node, ...args);
+
     const declarations = [];
     for (const importPath in imports) {
       const specifierNames = imports[importPath];
@@ -583,24 +730,24 @@ export default function (babel) {
       if (useRequire) {
         // eg; `const { map, uniq } = require('lodash');`
         for (const specifierName of specifierNames) {
-          const importIdentifier = t.identifier(specifierName);
-          specifiers.push(t.objectProperty(importIdentifier, importIdentifier, false, true));
+          const importIdentifier = n("identifier", specifierName);
+          specifiers.push(n("objectProperty", importIdentifier, importIdentifier, false, true));
         }
-        const requirePattern = t.objectPattern(specifiers);
-        const requireCall = t.callExpression(t.identifier("require"), [
-          t.stringLiteral(importPath)
+        const requirePattern = n("objectPattern", specifiers);
+        const requireCall = n("callExpression", n("identifier", "require"), [
+          n("stringLiteral", importPath)
         ]);
-        const requireStmt = t.variableDeclaration("const", [
-          t.variableDeclarator(requirePattern, requireCall),
+        const requireStmt = n("variableDeclaration", "const", [
+          n("variableDeclarator", requirePattern, requireCall),
         ]);
         declarations.push(requireStmt);
       } else {
         // eg; `import { map, uniq } from 'lodash';`
         for (const specifierName of specifierNames) {
-          const importIdentifier = t.identifier(specifierName);
-          specifiers.push(t.importSpecifier(importIdentifier, importIdentifier));
+          const importIdentifier = n("identifier", specifierName);
+          specifiers.push(n("importSpecifier", importIdentifier, importIdentifier));
         }
-        const importDeclaration = t.importDeclaration(specifiers, t.stringLiteral(importPath));
+        const importDeclaration = n("importDeclaration", specifiers, n("stringLiteral", importPath));
         declarations.push(importDeclaration);
       }
     }
@@ -821,12 +968,16 @@ export default function (babel) {
     path.traverse({
 
       ForInArrayStatement(path) {
+        const node = path.node;
+        const nb = (...args) => nodeBefore(node, ...args);
+        const n = (...args) => nodeAt(node, ...args);
+
         // If array is a complex expression, generate: const _arr = expr
         let refId;
         if (!path.get("array").isIdentifier()) {
           refId = path.scope.generateUidIdentifier("arr");
           path.insertBefore(
-            t.variableDeclaration("const", [ t.variableDeclarator(refId, path.node.array )])
+            nb("variableDeclaration", "const", [ nb("variableDeclarator", refId, path.node.array )])
           );
         } else {
           refId = path.node.array;
@@ -836,43 +987,45 @@ export default function (babel) {
         let idx = path.node.idx || path.scope.generateUidIdentifier("i");
         let len = path.scope.generateUidIdentifier("len");
         let declarations = [
-          t.variableDeclarator(idx, t.numericLiteral(0)),
-          t.variableDeclarator(
+          nb("variableDeclarator", idx, nb("numericLiteral", 0)),
+          nb("variableDeclarator",
             len,
-            t.memberExpression(refId, t.identifier("length"))
+            nb("memberExpression", refId, nb("identifier", "length"))
           )
         ];
-        let init = t.variableDeclaration("let", declarations);
+        let init = nb("variableDeclaration", "let", declarations);
         // _i < _len
-        let test = t.binaryExpression("<", idx, len);
+        let test = nb("binaryExpression", "<", idx, len);
         // _i++
-        let update = t.updateExpression("++", idx);
+        let update = nb("updateExpression", "++", idx);
 
         // Element initializer: const elem = _array[_i]
         let assignElemStmt = null;
         if (path.node.elem) {
           // TODO: note that destructuring takes place here for when we add that to the parser.
           // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignElemStmt = t.variableDeclaration("const", [
-            t.variableDeclarator(path.node.elem, t.memberExpression(refId, idx, true))
+          assignElemStmt = nb("variableDeclaration", "const", [
+            nb("variableDeclarator", path.node.elem, nb("memberExpression", refId, idx, true))
           ]);
         }
 
         ensureBlockBody(path);
         if (assignElemStmt) path.get("body").unshiftContainer("body", assignElemStmt);
 
-        let forNode = t.forStatement(init, test, update, path.node.body);
+        let forNode = n("forStatement", init, test, update, path.node.body);
         path.replaceWith(forNode);
       },
 
       ForInObjectStatement(path) {
+        const node = path.node;
+        const n = (...args) => nodeAt(node, ...args);
         let refId;
 
         // If object is a complex expression, generate: const _obj = expr
         if (!path.get("object").isIdentifier()) {
           refId = path.scope.generateUidIdentifier("obj");
           path.insertBefore(
-            t.variableDeclaration("const", [ t.variableDeclarator(refId, path.node.object )])
+            n("variableDeclaration", "const", [ n("variableDeclarator", refId, path.node.object )])
           );
         } else {
           refId = path.node.object;
@@ -880,18 +1033,18 @@ export default function (babel) {
 
         // Loop initializer: const _k
         let key = path.node.key || path.scope.generateUidIdentifier("k");
-        let init = t.variableDeclaration("const", [ t.variableDeclarator(key, null) ]);
+        let init = n("variableDeclaration", "const", [ n("variableDeclarator", key, null) ]);
 
         // if(!_obj.hasOwnProperty(_k)) continue
-        const hasOwnPropertyStmt = t.ifStatement(
-          t.unaryExpression(
+        const hasOwnPropertyStmt = n("ifStatement",
+          n("unaryExpression",
             "!",
-            t.callExpression(
-              t.memberExpression(refId, t.identifier("hasOwnProperty")),
+            n("callExpression",
+              n("memberExpression", refId, n("identifier", "hasOwnProperty")),
               [ key ]
             )
           ),
-          t.continueStatement()
+          n("continueStatement")
         );
 
         // Element initializer: const val = _obj[_k]
@@ -899,8 +1052,8 @@ export default function (babel) {
         if (path.node.val) {
           // TODO: note that destructuring takes place here for when we add that to the parser.
           // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignValStmt = t.variableDeclaration("const", [
-            t.variableDeclarator(path.node.val, t.memberExpression(refId, key, true))
+          assignValStmt = n("variableDeclaration", "const", [
+            n("variableDeclarator", path.node.val, n("memberExpression", refId, key, true))
           ]);
         }
 
@@ -909,7 +1062,7 @@ export default function (babel) {
         if (assignValStmt) path.get("body").unshiftContainer("body", assignValStmt);
         path.get("body").unshiftContainer("body", hasOwnPropertyStmt);
 
-        let forNode = t.forInStatement(init, refId, path.node.body);
+        let forNode = n("forInStatement", init, refId, path.node.body);
         path.replaceWith(forNode);
       },
 
@@ -917,14 +1070,23 @@ export default function (babel) {
         validateComprehensionLoopBody(path.get("loop.body"));
 
         const id = path.scope.generateUidIdentifier("arr");
-        transformTails(path.get("loop"), true, (expr) =>
-          t.callExpression(
-            t.memberExpression(id, t.identifier("push")),
+        transformTails(path.get("loop"), true, (expr, tailPath) => {
+          const node = tailPath.node;
+          const n = (...args) => nodeAt(node, ...args);
+
+          return n("callExpression",
+            n("memberExpression", id, t.identifier("push")),
             [expr]
+          );
+        });
+
+        path.replaceWith(
+          wrapComprehensionInIife(
+            id,
+            nodeAt(path.node, "arrayExpression"),
+            path.node.loop
           )
         );
-
-        path.replaceWith(wrapComprehensionInIife(id, t.arrayExpression(), path.node.loop));
       },
 
       ObjectComprehension(path) {
@@ -941,17 +1103,25 @@ export default function (babel) {
             " with a (key, value) pair.");
           }
 
+          const node = tailPath.node;
+          const n = (...args) => nodeAt(node, ...args);
           const keyExpr = seqExpr.expressions[0];
           const valExpr = seqExpr.expressions[1];
 
-          return t.assignmentExpression(
+          return n("assignmentExpression",
             "=",
-            t.memberExpression(id, keyExpr, true),
+            n("memberExpression", id, keyExpr, true),
             valExpr
           );
         });
 
-        path.replaceWith(wrapComprehensionInIife(id, t.objectExpression([]), path.node.loop));
+        path.replaceWith(
+          wrapComprehensionInIife(
+            id,
+            nodeAt(path.node, "objectExpression", []),
+            path.node.loop
+          )
+        );
       },
 
       TildeCallExpression: {
@@ -959,10 +1129,13 @@ export default function (babel) {
         // can process differently from a wrapping CallExpression
         // eg; `a?.b~c()` -> `a == null ? null : c(a.b)`
         exit(path) {
-          const callExpr = t.callExpression(path.node.right, [
-            path.node.left,
-            ...path.node.arguments,
-          ]);
+          // XXX: this might be breaking source maps because it makes impossible
+          // ordering, right appears after left in original source but before
+          // in transpiled source...
+          const callExpr = nodeAt(path.node, "callExpression",
+            path.node.right,
+            [path.node.left, ...path.node.arguments]
+          );
           path.replaceWith(callExpr);
         },
       },
@@ -980,20 +1153,22 @@ export default function (babel) {
 
       NamedArrowMemberExpression(path) {
         let object = path.node.object;
+        // XXX: direct node mutation, perhaps clone first?
         let node = path.node;
+        const n = (...args) => nodeAt(node, ...args);
         delete node.object;
         node.type = "NamedArrowExpression";
 
         if (!node.skinny) {
           node.skinny = true;  // binding here, don't turn into arrow
-          node = t.callExpression(
-            t.memberExpression(node, t.identifier("bind")),
+          node = n("callExpression",
+            n("memberExpression", node, n("identifier", "bind")),
             [object]
           );
         }
 
-        path.replaceWith(t.assignmentExpression("=",
-          t.memberExpression(object, path.node.id),
+        path.replaceWith(n("assignmentExpression", "=",
+          n("memberExpression", object, path.node.id),
           node,
         ));
       },
@@ -1079,10 +1254,14 @@ export default function (babel) {
         if (path.node.alternate) {
           blockToExpression(path, "alternate");
         } else {
-          path.get("alternate").replaceWith(t.nullLiteral());
+          // source map: implicit null else goes after the consequent
+          path.get("alternate").replaceWith(locateAfter(t.nullLiteral(), path.node.consequent));
         }
 
-        path.replaceWith(t.conditionalExpression(path.node.test, path.node.consequent, path.node.alternate));
+        path.replaceWith(nodeAt(
+          path.node, "conditionalExpression",
+          path.node.test, path.node.consequent, path.node.alternate
+        ));
       },
 
       AssignmentExpression(path) {
@@ -1101,41 +1280,54 @@ export default function (babel) {
       },
 
       SafeAwaitExpression(path) {
-        const errId = path.scope.generateUidIdentifier("err");
+        const node = path.node;
+        const n = (...args) => nodeAt(node, ...args);
+        const nb = (...args) => nodeBefore(node, ...args);
+        const na = (...args) => nodeAfter(node, ...args);
 
-        const tryCatch = t.tryStatement(
-          t.blockStatement([
-            t.returnStatement(t.awaitExpression(path.node.argument))
+        // source map: place err declaration before
+        const errId = locateBefore(path.scope.generateUidIdentifier("err"), node);
+
+        const tryCatch = n("tryStatement",
+          n("blockStatement", [
+            nb("returnStatement", n("awaitExpression", path.node.argument))
           ]),
-          t.catchClause(errId, t.blockStatement([
-            t.returnStatement(errId)
+          na("catchClause", errId, na("blockStatement", [
+            na("returnStatement", errId)
           ])),
         );
-        const fn = t.arrowFunctionExpression([], t.blockStatement([tryCatch]), true);
+        const fn = n("arrowFunctionExpression", [], n("blockStatement", [tryCatch]), true);
         // TODO: returntype annotation
-        const iife = t.callExpression(fn, []);
-        const awaitExpr = t.awaitExpression(iife);
+        const iife = n("callExpression", fn, []);
+        const awaitExpr = n("awaitExpression", iife);
         path.replaceWith(awaitExpr);
       },
 
+      // XXX: source mapping issues here.
       SafeMemberExpression(path) {
         // x?.y -> x == null ? x : x.y
         // x?[y] -> x == null ? x : x[y]
         const { node } = path;
         const { object } = node;
 
+        // Convert to ordinary member expression
+        node.type = "MemberExpression";
+        path.replaceWith(node);
+
+        // Generate null check
+        // XXX: sourcemap - treating this all as implicit code that comes before
+        // the member expr. possibly wrong, if the null check crashes maybe that
+        // should point at the node.object?
+        const nb = (...args) => nodeBefore(node, ...args);
         let left;
         if (object.type === "Identifier" || object.type === "SafeMemberExpression") {
           left = object;
         } else {
-          const ref = path.scope.generateDeclaredUidIdentifier("ref");
+          const ref = locateBefore(path.scope.generateDeclaredUidIdentifier("ref"), node);
           node.object = ref;
-          left = t.assignmentExpression("=", ref, object);
+          left = nb("assignmentExpression", "=", ref, object);
         }
-
-        const nullCheck = t.binaryExpression("==", left, t.nullLiteral());
-        node.type = "MemberExpression";
-        path.replaceWith(node);
+        const nullCheck = nb("binaryExpression", "==", left, nb("nullLiteral"));
 
         // Gather trailing subscripts/calls, which are parent nodes:
         // eg; in `o?.x.y()`, group trailing `.x.y()` into the ternary
@@ -1155,13 +1347,19 @@ export default function (babel) {
           }
         }
 
-        const ternary = t.conditionalExpression(nullCheck, t.nullLiteral(), tail.node);
+        // XXX: source map - treating this as all coming from the tail node.
+        // again possibly wrong, difficult to see the possibilities
+        const ternary = nodeAt(tail.node, "conditionalExpression",
+          nullCheck,
+          nodeBefore(tail.node, "nullLiteral"),
+          tail.node
+        );
         tail.replaceWith(ternary);
       },
 
       AwaitExpression(path) {
         if (path.get("argument").isArrayExpression() || path.node.argument.type === "ArrayComprehension") {
-          const promiseDotAllCall = t.callExpression(
+          const promiseDotAllCall = nodeAt(path.node, "callExpression",
             t.memberExpression(t.identifier("Promise"), t.identifier("all")),
             [path.node.argument],
           );

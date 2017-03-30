@@ -4,7 +4,9 @@
   "description": "Compile LightScript to JavaScript.",
   "main": "index.js",
   "scripts": {
-    "test": "mocha test",
+    "test": "npm run test:mocha",
+    "test:mocha": "mocha test",
+    "test:source-maps": "node util/test-source-maps.js --errorsOnly",
     "test:debug": "node --inspect --debug-brk node_modules/.bin/_mocha test",
     "build": "babel src --out-dir ."
   },
@@ -31,6 +33,8 @@
     "eslint-config-babel": "^3.0.0",
     "eslint-plugin-babel": "^4.0.0",
     "eslint-plugin-flowtype": "^2.4.0",
-    "mocha": "^3.2.0"
+    "glob": "^7.1.1",
+    "mocha": "^3.2.0",
+    "yargs": "^7.0.2"
   }
 }
