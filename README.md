@@ -21,3 +21,5 @@ You will need to link babel-plugin-lightscript to itself:
     npm install
     npm run build
     npm test
+
+Please report issues on [the main lightscript repo](https://github.com/lightscript/lightscript) instead of here. 
