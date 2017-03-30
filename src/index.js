@@ -1359,8 +1359,11 @@ export default function (babel) {
 
       AwaitExpression(path) {
         if (path.get("argument").isArrayExpression() || path.node.argument.type === "ArrayComprehension") {
+          const node = path.node;
+          const nb = (...args) => nodeBefore(node, ...args);
+
           const promiseDotAllCall = nodeAt(path.node, "callExpression",
-            t.memberExpression(t.identifier("Promise"), t.identifier("all")),
+            nb("memberExpression", nb("identifier", "Promise"), nb("identifier", "all")),
             [path.node.argument],
           );
           path.get("argument").replaceWith(promiseDotAllCall);
