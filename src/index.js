@@ -229,6 +229,13 @@ export default function (babel) {
     return newNode;
   }
 
+  function cloneAt(sourceNode, node) {
+    if (!node) return node; // undef/null
+    const newNode = t.clone(node);
+    locateAt(newNode, sourceNode);
+    return newNode;
+  }
+
   function cloneBefore(sourceNode, node) {
     if (!node) return node; // undef/null
     const newNode = t.clone(node);
@@ -241,6 +248,23 @@ export default function (babel) {
     const newNode = t.clone(node);
     locateAfter(newNode, sourceNode);
     return newNode;
+  }
+
+  // Traverse node structures that are not yet attached to the AST body
+  // Algorithm from babel-types/src/index.js#286
+  function traverseNodes(rootNode, visitor) {
+    visitor(rootNode);
+    for (const key in rootNode) {
+      if (key[0] === "_") continue;
+      let val = rootNode[key];
+      if (val) {
+        if (val.type) {
+          traverseNodes(val, visitor);
+        } else if (Array.isArray(val)) {
+          val.forEach( (x) => traverseNodes(x, visitor) );
+        }
+      }
+    }
   }
 
   function isFunctionDeclaration(node) {
@@ -463,25 +487,41 @@ export default function (babel) {
     classDeclarationPath.resync(); // uhh, just in case?
     let { node } = classDeclarationPath;
 
+    const classBodyPath = classDeclarationPath.get("body");
+    const classBodyNode = classBodyPath.node;
+
     // add empty constructor if it wasn't there
     if (!constructorPath) {
-      let emptyConstructor = t.classMethod("constructor", t.identifier("constructor"),
-        [], t.blockStatement([]));
+      // constructor goes before class body in sourcemap
+      const n = (...args) => nodeBefore(classBodyNode, ...args);
+      let emptyConstructor = n(
+        "classMethod", "constructor",
+        n("identifier", "constructor"),
+        [],
+        n("blockStatement", [])
+      );
       emptyConstructor.skinny = true; // mark for super insertion
-      classDeclarationPath.get("body").unshiftContainer("body", emptyConstructor);
-      constructorPath = classDeclarationPath.get("body.body.0.body");
+      classBodyPath.unshiftContainer("body", emptyConstructor);
+      constructorPath = classBodyPath.get("body.0.body");
     }
 
     // add super if it wasn't there (unless defined with curly braces)
     if (node.superClass && constructorPath.parentPath.node.skinny && !containsSuperCall(constructorPath)) {
+      // All this stuff is going to be at the beginning of the constructor...
+      const constructorNode = constructorPath.node;
+      const n = (...args) => nodeBefore(constructorNode, ...args);
+      const c = (node) => cloneBefore(constructorNode, node);
+
       let superCall;
       if (constructorPath.parentPath.node.params.length) {
         const params = constructorPath.parentPath.node.params;
-        superCall = t.expressionStatement(t.callExpression(t.super(), params));
+        superCall = n("expressionStatement", n("callExpression", n("super"), params));
       } else {
         let argsUid = classDeclarationPath.scope.generateUidIdentifier("args");
-        let params = [t.restElement(argsUid)];
-        superCall = t.expressionStatement(t.callExpression(t.super(), [t.spreadElement(argsUid)]));
+        let params = [n("restElement", c(argsUid))];
+        superCall = n("expressionStatement",
+          n("callExpression", n("super"), [n("spreadElement", c(argsUid))])
+        );
         constructorPath.parentPath.node.params = params;
       }
       constructorPath.unshiftContainer("body", superCall);
@@ -491,25 +531,25 @@ export default function (babel) {
   }
 
   // XXX: source mapping issues.
-  function bindMethodsInConstructor(path, constructorPath, methodIds) {
-    path.resync(); // uhh, just in case?
-    let { node } = path;
+  function bindMethodsInConstructor(classDeclarationPath, constructorPath, methodIds) {
+    classDeclarationPath.resync(); // uhh, just in case?
+    let { node } = classDeclarationPath;
 
-    // XXX: I think we need to know the superPath before we make these nodes
-    // or else we need to go through and transform them all later.
+    // XXX: Source mapping: we have to make different nodes for each insertion
+    // we do because they will appear in different source positions.
+    const emplacedAssignments = (n, c) => {
+      return methodIds.map((methodId) => {
+        assertOneOf(methodId, ["Identifier", "Expression"]);
 
-    // `this.method = this.method.bind(this);`
-    let assignments = methodIds.map((methodId) => {
-      assertOneOf(methodId, ["Identifier", "Expression"]);
-
-      let isComputed = !t.isIdentifier(methodId);
-      let thisDotMethod = t.memberExpression(t.thisExpression(), methodId, isComputed);
-      let bind = t.callExpression(
-        t.memberExpression(thisDotMethod, t.identifier("bind")),
-        [t.thisExpression()]
-      );
-      return t.expressionStatement(t.assignmentExpression("=", thisDotMethod, bind));
-    });
+        let isComputed = !t.isIdentifier(methodId);
+        let thisDotMethod = n("memberExpression", n("thisExpression"), c(methodId), isComputed);
+        let bind = n("callExpression",
+          n("memberExpression", thisDotMethod, n("identifier", "bind")),
+          [n("thisExpression")]
+        );
+        return n("expressionStatement", n("assignmentExpression", "=", thisDotMethod, bind));
+      });
+    };
 
     // directly after each instance of super(), insert the thingies there.
     if (node.superClass) {
@@ -524,17 +564,25 @@ export default function (babel) {
             .findParent((p) => p.isReturnStatement() && p.getFunctionParent() === constructorPath.parentPath);
           if (enclosingReturn) throw new Error("Can't use => with `return super()`; try removing `return`.");
 
-          superStatementPath.insertAfter(assignments);
+          // `this.method = this.method.bind(this);`
+          const targetNode = superStatementPath.node;
+          const n = (...args) => nodeAfter(targetNode, ...args);
+          const c = (node) => cloneAfter(targetNode, node);
+          superStatementPath.insertAfter(emplacedAssignments(n, c));
         }
       });
     } else {
-      constructorPath.unshiftContainer("body", assignments);
+      const targetNode = constructorPath.node; // XXX: is this right?
+      const n = (...args) => nodeBefore(targetNode, ...args);
+      const c = (node) => cloneBefore(targetNode, node);
+      constructorPath.unshiftContainer("body", emplacedAssignments(n, c));
     }
   }
 
   // XXX: source mapping issues
   function bindMethods(path, methodIds) {
     let assignId, inExpression = false;
+    let parentNode = path.getStatementParent().node;
 
     if (path.isClassDeclaration()) {
       assignId = path.node.id;
@@ -542,11 +590,15 @@ export default function (babel) {
       path.parentPath.isAssignmentExpression() &&
       path.parentPath.parentPath.isExpressionStatement()
     ) {
-      assignId = path.parentPath.node.left;
+      // We need to deep clone this and fixup the source maps
+      assignId = t.cloneDeep(path.parentPath.node.left);
+      traverseNodes(assignId, (node) => locateAfter(node, parentNode));
     } else if (path.parentPath.isVariableDeclarator()) {
       assignId = path.parentPath.node.id;
     } else {
       let id = path.isClass() ? "class" : "obj";
+      parentNode = path.node;
+      // XXX: source maps: this generates a node with no source map
       assignId = path.getStatementParent().scope.generateDeclaredUidIdentifier(id);
       inExpression = true;
     }
@@ -556,13 +608,11 @@ export default function (babel) {
     // otherwise, insertedAfter.
     let n, c;
     if (inExpression) {
-      const node = path.node;
-      n = (...args) => nodeAt(node, ...args);
-      c = (x) => x; // XXX: wrong.
+      n = (...args) => nodeAt(parentNode, ...args);
+      c = (x) => cloneAt(parentNode, x);
     } else {
-      const parentNode = path.getStatementParent().node;
       n = (...args) => nodeAfter(parentNode, ...args);
-      c = (...args) => cloneAfter(parentNode, ...args);
+      c = (x) => cloneAfter(parentNode, x);
     }
 
     let assignments = methodIds.map((methodId) => {
@@ -681,7 +731,7 @@ export default function (babel) {
   // guessing path here is just the top of the body which is maybe fine?
   function insertStdlibImports(path, imports: Imports, useRequire) {
     const node = path.node;
-    const n = (...args) => nodeAt(node, ...args);
+    const n = (...args) => nodeBefore(node, ...args);
 
     const declarations = [];
     for (const importPath in imports) {
