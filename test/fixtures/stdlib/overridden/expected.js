@@ -1,8 +1,5 @@
-import { map } from "lodash";
-
-function uniq() {
+import { map } from "lodash";function uniq() {
   return 1;
 }
-
 uniq();
 map();
