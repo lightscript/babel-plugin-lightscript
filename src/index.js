@@ -191,6 +191,7 @@ export default function (babel) {
       newNode.start = sourceNode.start;
       newNode.end = sourceNode.end;
     }
+    return newNode;
   }
 
   function locateBefore(newNode, sourceNode) {
@@ -200,6 +201,7 @@ export default function (babel) {
       newNode.start = sourceNode.start;
       newNode.end = sourceNode.start;
     }
+    return newNode;
   }
 
   function locateAfter(newNode, sourceNode) {
@@ -209,45 +211,40 @@ export default function (babel) {
       newNode.start = sourceNode.end;
       newNode.end = sourceNode.end;
     }
+    return newNode;
   }
 
   function nodeAt(sourceNode, type, ...args) {
     const newNode = t[type](...args);
-    locateAt(newNode, sourceNode);
-    return newNode;
+    return locateAt(newNode, sourceNode);
   }
 
   function nodeBefore(sourceNode, type, ...args) {
     const newNode = t[type](...args);
-    locateBefore(newNode, sourceNode);
-    return newNode;
+    return locateBefore(newNode, sourceNode);
   }
 
   function nodeAfter(sourceNode, type, ...args) {
     const newNode = t[type](...args);
-    locateAfter(newNode, sourceNode);
-    return newNode;
+    return locateAfter(newNode, sourceNode);
   }
 
   function cloneAt(sourceNode, node) {
     if (!node) return node; // undef/null
     const newNode = t.clone(node);
-    locateAt(newNode, sourceNode);
-    return newNode;
+    return locateAt(newNode, sourceNode);
   }
 
   function cloneBefore(sourceNode, node) {
     if (!node) return node; // undef/null
     const newNode = t.clone(node);
-    locateBefore(newNode, sourceNode);
-    return newNode;
+    return locateBefore(newNode, sourceNode);
   }
 
   function cloneAfter(sourceNode, node) {
     if (!node) return node; // undef/null
     const newNode = t.clone(node);
-    locateAfter(newNode, sourceNode);
-    return newNode;
+    return locateAfter(newNode, sourceNode);
   }
 
   // Traverse node structures that are not yet attached to the AST body
@@ -409,7 +406,6 @@ export default function (babel) {
     if (isStatement) {
       replaceWithPlainFunction(path);
 
-      // XXX source maps: all these nodes are going after the base node.
       const bound = na("callExpression",
         na("memberExpression", path.node.id, na("identifier", "bind")),
         [na("thisExpression")]
@@ -464,8 +460,7 @@ export default function (babel) {
 
   function addImplicitReturns(path) {
     transformTails(path, false, (expr, tailPath) => {
-      const node = tailPath.node;
-      return nodeBefore(node, "returnStatement", expr);
+      return nodeBefore(tailPath.node, "returnStatement", expr);
     });
   }
 
@@ -482,7 +477,6 @@ export default function (babel) {
     return hasSuper;
   }
 
-  // XXX: source mapping issues
   function ensureConstructorWithSuper(classDeclarationPath, constructorPath) {
     classDeclarationPath.resync(); // uhh, just in case?
     let { node } = classDeclarationPath;
@@ -510,17 +504,16 @@ export default function (babel) {
       // All this stuff is going to be at the beginning of the constructor...
       const constructorNode = constructorPath.node;
       const n = (...args) => nodeBefore(constructorNode, ...args);
-      const c = (node) => cloneBefore(constructorNode, node);
 
       let superCall;
       if (constructorPath.parentPath.node.params.length) {
         const params = constructorPath.parentPath.node.params;
         superCall = n("expressionStatement", n("callExpression", n("super"), params));
       } else {
-        let argsUid = classDeclarationPath.scope.generateUidIdentifier("args");
-        let params = [n("restElement", c(argsUid))];
+        let argsUid = locateBefore(classDeclarationPath.scope.generateUidIdentifier("args"), constructorNode);
+        let params = [n("restElement", argsUid)];
         superCall = n("expressionStatement",
-          n("callExpression", n("super"), [n("spreadElement", c(argsUid))])
+          n("callExpression", n("super"), [n("spreadElement", argsUid)])
         );
         constructorPath.parentPath.node.params = params;
       }
@@ -590,9 +583,7 @@ export default function (babel) {
       path.parentPath.isAssignmentExpression() &&
       path.parentPath.parentPath.isExpressionStatement()
     ) {
-      // We need to deep clone this and fixup the source maps
-      assignId = t.cloneDeep(path.parentPath.node.left);
-      traverseNodes(assignId, (node) => locateAfter(node, parentNode));
+      assignId = path.parentPath.node.left;
     } else if (path.parentPath.isVariableDeclarator()) {
       assignId = path.parentPath.node.id;
     } else {
@@ -606,23 +597,21 @@ export default function (babel) {
 
     // XXX: source mapping. if in expression, this will be replacedWith,
     // otherwise, insertedAfter.
-    let n, c;
+    let n;
     if (inExpression) {
       n = (...args) => nodeAt(parentNode, ...args);
-      c = (x) => cloneAt(parentNode, x);
     } else {
       n = (...args) => nodeAfter(parentNode, ...args);
-      c = (x) => cloneAfter(parentNode, x);
     }
 
     let assignments = methodIds.map((methodId) => {
       // could be computed, eg `['blah']() => {}`
       assertOneOf(methodId, ["Identifier", "Expression"]);
       let isComputed = !t.isIdentifier(methodId);
-      let objDotMethod = n("memberExpression", c(assignId), c(methodId), isComputed);
+      let objDotMethod = n("memberExpression", assignId, methodId, isComputed);
       let bind = n("callExpression",
         n("memberExpression", objDotMethod, n("identifier", "bind")),
-        [c(assignId)]
+        [assignId]
       );
       return n("assignmentExpression", "=", objDotMethod, bind);
     });
@@ -632,9 +621,9 @@ export default function (babel) {
       // (the first one, maybe) to emplace at the node, then the rest
       // should be emplaced before/after
       path.replaceWith(n("sequenceExpression", [
-        n("assignmentExpression", "=", c(assignId), path.node),
+        n("assignmentExpression", "=", assignId, path.node),
         ...assignments,
-        c(assignId)
+        assignId
       ]));
     } else {
       // XXX: sourcemap: this one is ok I think, since n = parent.nodeAfter and they
@@ -1265,7 +1254,8 @@ export default function (babel) {
         if (path.node.alternate) {
           blockToExpression(path, "alternate");
         } else {
-          path.get("alternate").replaceWith(t.nullLiteral());
+          // source map: implicit null else goes after the consequent
+          path.get("alternate").replaceWith(locateAfter(t.nullLiteral(), path.node.consequent));
         }
 
         path.replaceWith(nodeAt(
@@ -1290,21 +1280,25 @@ export default function (babel) {
       },
 
       SafeAwaitExpression(path) {
-        const errId = path.scope.generateUidIdentifier("err");
         const node = path.node;
         const n = (...args) => nodeAt(node, ...args);
+        const nb = (...args) => nodeBefore(node, ...args);
+        const na = (...args) => nodeAfter(node, ...args);
 
-        const tryCatch = t.tryStatement(
-          t.blockStatement([
-            t.returnStatement(t.awaitExpression(path.node.argument))
+        // source map: place err declaration before
+        const errId = locateBefore(path.scope.generateUidIdentifier("err"), node);
+
+        const tryCatch = n("tryStatement",
+          n("blockStatement", [
+            nb("returnStatement", n("awaitExpression", path.node.argument))
           ]),
-          t.catchClause(errId, t.blockStatement([
-            t.returnStatement(errId)
+          na("catchClause", errId, na("blockStatement", [
+            na("returnStatement", errId)
           ])),
         );
-        const fn = t.arrowFunctionExpression([], t.blockStatement([tryCatch]), true);
+        const fn = n("arrowFunctionExpression", [], n("blockStatement", [tryCatch]), true);
         // TODO: returntype annotation
-        const iife = t.callExpression(fn, []);
+        const iife = n("callExpression", fn, []);
         const awaitExpr = n("awaitExpression", iife);
         path.replaceWith(awaitExpr);
       },
