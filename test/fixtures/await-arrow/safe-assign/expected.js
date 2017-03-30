@@ -5,6 +5,5 @@ async function fn() {
     } catch (_err) {
       return _err;
     }
-  })();
-  return x + 1;
+  })();return x + 1;
 }
