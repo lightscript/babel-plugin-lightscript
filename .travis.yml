@@ -4,5 +4,9 @@ node_js:
   - '6'
   - '7'
 
+before_script:
+  - npm link
+  - npm link babel-plugin-lightscript
+
 notifications:
   email: false
