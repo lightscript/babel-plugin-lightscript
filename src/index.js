@@ -229,24 +229,6 @@ export default function (babel) {
     return locateAfter(newNode, sourceNode);
   }
 
-  function cloneAt(sourceNode, node) {
-    if (!node) return node; // undef/null
-    const newNode = t.clone(node);
-    return locateAt(newNode, sourceNode);
-  }
-
-  function cloneBefore(sourceNode, node) {
-    if (!node) return node; // undef/null
-    const newNode = t.clone(node);
-    return locateBefore(newNode, sourceNode);
-  }
-
-  function cloneAfter(sourceNode, node) {
-    if (!node) return node; // undef/null
-    const newNode = t.clone(node);
-    return locateAfter(newNode, sourceNode);
-  }
-
   // Traverse node structures that are not yet attached to the AST body
   // Algorithm from babel-types/src/index.js#286
   function traverseNodes(rootNode, visitor) {
@@ -461,7 +443,7 @@ export default function (babel) {
 
   function addImplicitReturns(path) {
     transformTails(path, false, (expr, tailPath) => {
-      return nodeBefore(tailPath.node, "returnStatement", expr);
+      return nodeAt(tailPath.node, "returnStatement", expr);
     });
   }
 
