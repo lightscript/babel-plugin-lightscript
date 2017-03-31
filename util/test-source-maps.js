@@ -46,6 +46,7 @@ const parserOpts = {
 
 const babelOpts = {
   plugins: [lightscript],
+  sourceMaps: true
 };
 
 function createErrorRecord(file, node, path, nodeIndex, problem) {
@@ -116,12 +117,13 @@ for (const jsFile of jsFiles) {
     }
   }
 
-  let parseTree, ast, transformedCode;
+  let parseTree, ast, transformedCode, map;
   try {
     parseTree = babylon_lightscript.parse(code, parserOpts);
     let result = babel.transformFromAst(parseTree, code, babelOpts);
     ast = result.ast;
     transformedCode = result.code;
+    map = result.map;
   } catch (err) {
     // If compiling multiple files, Assume babel errors are intentional
     if (jsFiles.length === 1) {
@@ -137,6 +139,7 @@ for (const jsFile of jsFiles) {
     expected,
     matchesExpected: expected && (expected.trim() === transformedCode.trim()),
     transformedCode,
+    map,
     astNodes: [],
     problems: []
   };

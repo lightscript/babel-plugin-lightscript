@@ -331,7 +331,8 @@ export default function (babel) {
         ),
         loopBody,
         na("returnStatement", bodyVarId)
-      ]));
+      ])
+    );
 
     return nodeAt(loopBody, "callExpression", fn, []);
   }
@@ -530,12 +531,12 @@ export default function (babel) {
 
     // XXX: Source mapping: we have to make different nodes for each insertion
     // we do because they will appear in different source positions.
-    const emplacedAssignments = (n, c) => {
+    const emplacedAssignments = (n) => {
       return methodIds.map((methodId) => {
         assertOneOf(methodId, ["Identifier", "Expression"]);
 
         let isComputed = !t.isIdentifier(methodId);
-        let thisDotMethod = n("memberExpression", n("thisExpression"), c(methodId), isComputed);
+        let thisDotMethod = n("memberExpression", n("thisExpression"), methodId, isComputed);
         let bind = n("callExpression",
           n("memberExpression", thisDotMethod, n("identifier", "bind")),
           [n("thisExpression")]
@@ -560,15 +561,13 @@ export default function (babel) {
           // `this.method = this.method.bind(this);`
           const targetNode = superStatementPath.node;
           const n = (...args) => nodeAfter(targetNode, ...args);
-          const c = (node) => cloneAfter(targetNode, node);
-          superStatementPath.insertAfter(emplacedAssignments(n, c));
+          superStatementPath.insertAfter(emplacedAssignments(n));
         }
       });
     } else {
       const targetNode = constructorPath.node; // XXX: is this right?
       const n = (...args) => nodeBefore(targetNode, ...args);
-      const c = (node) => cloneBefore(targetNode, node);
-      constructorPath.unshiftContainer("body", emplacedAssignments(n, c));
+      constructorPath.unshiftContainer("body", emplacedAssignments(n));
     }
   }
 
@@ -589,8 +588,10 @@ export default function (babel) {
     } else {
       let id = path.isClass() ? "class" : "obj";
       parentNode = path.node;
-      // XXX: source maps: this generates a node with no source map
       assignId = path.getStatementParent().scope.generateDeclaredUidIdentifier(id);
+      // source maps: this var points at the object in the code, so locate
+      // it there.
+      locateAt(assignId, parentNode);
       inExpression = true;
     }
     assertOneOf(assignId, ["Identifier", "MemberExpression"]);
@@ -639,7 +640,6 @@ export default function (babel) {
       // Grab the original node, with good sourcemap data, before babel
       // clobbers it...
       const parentNode = path.node[key];
-      // Clobber it
       path.get(key).canSwapBetweenExpressionAndStatement = () => true;
       path.get(key).replaceExpressionWithStatements(path.node[key].body);
       // XXX: this is definitely imperfect, but the only alternative would seem to be
@@ -727,8 +727,6 @@ export default function (babel) {
     }
   }
 
-  // XXX: source mapping for inserted imports? not sure how to handle.
-  // guessing path here is just the top of the body which is maybe fine?
   function insertStdlibImports(path, imports: Imports, useRequire) {
     const node = path.node;
     const n = (...args) => nodeBefore(node, ...args);
@@ -979,14 +977,21 @@ export default function (babel) {
     path.traverse({
 
       ForInArrayStatement(path) {
+        // Source mapping: nb is for generated code outside the loop, n is for
+        // nodes that enclose the loop, nbb is for generated code inside the loop
+        // at the top of the body.
         const node = path.node;
         const nb = (...args) => nodeBefore(node, ...args);
         const n = (...args) => nodeAt(node, ...args);
 
+        ensureBlockBody(path);
+        const bodyNode = path.get("body").node;
+        const nbb = (...args) => nodeBefore(bodyNode, ...args);
+
         // If array is a complex expression, generate: const _arr = expr
         let refId;
         if (!path.get("array").isIdentifier()) {
-          refId = path.scope.generateUidIdentifier("arr");
+          refId = locateBefore(path.scope.generateUidIdentifier("arr"), node);
           path.insertBefore(
             nb("variableDeclaration", "const", [ nb("variableDeclarator", refId, path.node.array )])
           );
@@ -995,8 +1000,8 @@ export default function (babel) {
         }
 
         // let _i = 0, _len = array.length
-        let idx = path.node.idx || path.scope.generateUidIdentifier("i");
-        let len = path.scope.generateUidIdentifier("len");
+        let idx = path.node.idx || locateBefore(path.scope.generateUidIdentifier("i"), node);
+        let len = locateBefore(path.scope.generateUidIdentifier("len"), node);
         let declarations = [
           nb("variableDeclarator", idx, nb("numericLiteral", 0)),
           nb("variableDeclarator",
@@ -1015,8 +1020,8 @@ export default function (babel) {
         if (path.node.elem) {
           // TODO: note that destructuring takes place here for when we add that to the parser.
           // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignElemStmt = nb("variableDeclaration", "const", [
-            nb("variableDeclarator", path.node.elem, nb("memberExpression", refId, idx, true))
+          assignElemStmt = nbb("variableDeclaration", "const", [
+            nbb("variableDeclarator", path.node.elem, nbb("memberExpression", refId, idx, true))
           ]);
         }
 
@@ -1028,34 +1033,42 @@ export default function (babel) {
       },
 
       ForInObjectStatement(path) {
+        // Source mapping: nb is for generated code outside the loop, n is for
+        // nodes that enclose the loop, nbb is for generated code inside the loop
+        // at the top of the body.
         const node = path.node;
+        const nb = (...args) => nodeBefore(node, ...args);
         const n = (...args) => nodeAt(node, ...args);
-        let refId;
+
+        ensureBlockBody(path);
+        const bodyNode = path.get("body").node;
+        const nbb = (...args) => nodeBefore(bodyNode, ...args);
 
         // If object is a complex expression, generate: const _obj = expr
+        let refId;
         if (!path.get("object").isIdentifier()) {
-          refId = path.scope.generateUidIdentifier("obj");
+          refId = locateBefore(path.scope.generateUidIdentifier("obj"), node);
           path.insertBefore(
-            n("variableDeclaration", "const", [ n("variableDeclarator", refId, path.node.object )])
+            nb("variableDeclaration", "const", [ nb("variableDeclarator", refId, path.node.object )])
           );
         } else {
           refId = path.node.object;
         }
 
         // Loop initializer: const _k
-        let key = path.node.key || path.scope.generateUidIdentifier("k");
-        let init = n("variableDeclaration", "const", [ n("variableDeclarator", key, null) ]);
+        let key = path.node.key || locateBefore(path.scope.generateUidIdentifier("k"), node);
+        let init = nb("variableDeclaration", "const", [ nb("variableDeclarator", key, null) ]);
 
         // if(!_obj.hasOwnProperty(_k)) continue
-        const hasOwnPropertyStmt = n("ifStatement",
-          n("unaryExpression",
+        const hasOwnPropertyStmt = nbb("ifStatement",
+          nbb("unaryExpression",
             "!",
-            n("callExpression",
-              n("memberExpression", refId, n("identifier", "hasOwnProperty")),
+            nbb("callExpression",
+              nbb("memberExpression", refId, nbb("identifier", "hasOwnProperty")),
               [ key ]
             )
           ),
-          n("continueStatement")
+          nbb("continueStatement")
         );
 
         // Element initializer: const val = _obj[_k]
@@ -1063,13 +1076,12 @@ export default function (babel) {
         if (path.node.val) {
           // TODO: note that destructuring takes place here for when we add that to the parser.
           // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignValStmt = n("variableDeclaration", "const", [
-            n("variableDeclarator", path.node.val, n("memberExpression", refId, key, true))
+          assignValStmt = nbb("variableDeclaration", "const", [
+            nbb("variableDeclarator", path.node.val, nbb("memberExpression", refId, key, true))
           ]);
         }
 
         // Add hasOwnProperty, followed by element initializer, to loop body
-        ensureBlockBody(path);
         if (assignValStmt) path.get("body").unshiftContainer("body", assignValStmt);
         path.get("body").unshiftContainer("body", hasOwnPropertyStmt);
 
@@ -1080,13 +1092,15 @@ export default function (babel) {
       ArrayComprehension(path) {
         validateComprehensionLoopBody(path.get("loop.body"));
 
-        const id = path.scope.generateUidIdentifier("arr");
+        const id = locateBefore(path.scope.generateUidIdentifier("arr"), path.node);
+
         transformTails(path.get("loop"), true, (expr, tailPath) => {
           const node = tailPath.node;
           const n = (...args) => nodeAt(node, ...args);
+          const nb = (...args) => nodeBefore(node, ...args);
 
           return n("callExpression",
-            n("memberExpression", id, t.identifier("push")),
+            nb("memberExpression", id, nb("identifier", "push")),
             [expr]
           );
         });
@@ -1094,7 +1108,7 @@ export default function (babel) {
         path.replaceWith(
           wrapComprehensionInIife(
             id,
-            nodeAt(path.node, "arrayExpression"),
+            nodeBefore(path.node, "arrayExpression"),
             path.node.loop
           )
         );
@@ -1103,7 +1117,8 @@ export default function (babel) {
       ObjectComprehension(path) {
         validateComprehensionLoopBody(path.get("loop.body"));
 
-        const id = path.scope.generateUidIdentifier("obj");
+        const id = locateBefore(path.scope.generateUidIdentifier("obj"), path.node);
+
         transformTails(path.get("loop"), true, function(seqExpr, tailPath) {
           // Only SeqExprs of length 2 are valid.
           if (
@@ -1116,6 +1131,7 @@ export default function (babel) {
 
           const node = tailPath.node;
           const n = (...args) => nodeAt(node, ...args);
+
           const keyExpr = seqExpr.expressions[0];
           const valExpr = seqExpr.expressions[1];
 
@@ -1129,7 +1145,7 @@ export default function (babel) {
         path.replaceWith(
           wrapComprehensionInIife(
             id,
-            nodeAt(path.node, "objectExpression", []),
+            nodeBefore(path.node, "objectExpression", []),
             path.node.loop
           )
         );
