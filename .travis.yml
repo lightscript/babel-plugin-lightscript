@@ -5,6 +5,7 @@ node_js:
   - '7'
 
 before_script:
+  - npm run build
   - npm link
   - npm link babel-plugin-lightscript
 
