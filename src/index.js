@@ -636,10 +636,21 @@ export default function (babel) {
 
   function blockToExpression(path, key) {
     if (t.isBlockStatement(path.node[key])) {
+      // Grab the original node, with good sourcemap data, before babel
+      // clobbers it...
+      const parentNode = path.node[key];
+      // Clobber it
       path.get(key).canSwapBetweenExpressionAndStatement = () => true;
-      // XXX: my money says this doesn't generate source maps properly...
-      // check where this is being used and diagnose fixtures...
       path.get(key).replaceExpressionWithStatements(path.node[key].body);
+      // XXX: this is definitely imperfect, but the only alternative would seem to be
+      // copying/rewriting replaceExpressionWithStatements...
+      // any errors coming from the nodes the user wrote should map fine, but
+      // any errors coming from the gunk that babel generates here will just
+      // appear as though they are coming from inside the entirety of the
+      // corresponding if/elif block...
+      traverseNodes(path.node[key], (node) => {
+        if (!node.loc) locateAt(node, parentNode);
+      });
     }
   }
 
