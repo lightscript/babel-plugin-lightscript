@@ -183,6 +183,56 @@ export default function (babel) {
 
 
   // HELPER FUNCTIONS
+
+  // Source mapping tools
+  // These can be used to create and place Babel nodes at certain relative
+  // positions to other Babel nodes.
+  /* eslint-disable no-unused-vars */
+  function locateAt(newNode, sourceNode) {
+    if (sourceNode) {
+      newNode.loc = sourceNode.loc;
+      newNode.start = sourceNode.start;
+      newNode.end = sourceNode.end;
+    }
+    return newNode;
+  }
+
+  function locateBefore(newNode, sourceNode) {
+    if (sourceNode) {
+      newNode.loc = Object.assign({}, sourceNode.loc);
+      newNode.loc.end = newNode.loc.start;
+      newNode.start = sourceNode.start;
+      newNode.end = sourceNode.start;
+    }
+    return newNode;
+  }
+
+  function locateAfter(newNode, sourceNode) {
+    if (sourceNode) {
+      newNode.loc = Object.assign({}, sourceNode.loc);
+      newNode.loc.start = newNode.loc.end;
+      newNode.start = sourceNode.end;
+      newNode.end = sourceNode.end;
+    }
+    return newNode;
+  }
+
+  function nodeAt(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    return locateAt(newNode, sourceNode);
+  }
+
+  function nodeBefore(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    return locateBefore(newNode, sourceNode);
+  }
+
+  function nodeAfter(sourceNode, type, ...args) {
+    const newNode = t[type](...args);
+    return locateAfter(newNode, sourceNode);
+  }
+  /* eslint-enable no-unused-vars */
+
   function isFunctionDeclaration(node) {
     return node && (t.is("FunctionDeclaration", node) || node.type === "NamedArrowDeclaration");
   }
@@ -366,7 +416,11 @@ export default function (babel) {
   // c/p from replaceExpressionWithStatements
 
   function addImplicitReturns(path) {
-    transformTails(path, false, (expr) => t.returnStatement(expr));
+    transformTails(path, false, (expr) => {
+      // Source map: treat the return statement as being at the same
+      // location as the implicitly returned expression.
+      return nodeAt(expr, "returnStatement", expr);
+    });
   }
 
   function containsSuperCall(path) {
