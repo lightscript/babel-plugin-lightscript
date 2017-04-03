@@ -10,7 +10,7 @@
     "test": "mocha test",
     "test:debug": "node --inspect --debug-brk mocha test",
     "build": "babel src --out-dir .",
-    "prepublish": "npm run build"
+    "prepublish": "npm run build && npm test"
   },
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
   "homepage": "http://lightscript.org/",
