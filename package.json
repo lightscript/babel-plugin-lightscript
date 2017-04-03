@@ -9,7 +9,8 @@
   "scripts": {
     "test": "mocha test",
     "test:debug": "node --inspect --debug-brk mocha test",
-    "build": "babel src --out-dir ."
+    "build": "babel src --out-dir .",
+    "prepublish": "npm run build"
   },
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
   "homepage": "http://lightscript.org/",
