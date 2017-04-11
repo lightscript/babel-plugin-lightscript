@@ -4,7 +4,7 @@ function f() {
   const _obj = sideEffect1();
 
   for (const k1 in _obj) {
-    if (!_obj.hasOwnProperty(k1)) continue;
+    if (!{}.hasOwnProperty.call(_obj, k1)) continue;
     k1;
   }
 }

@@ -1,4 +1,4 @@
 for (const k in obj) {
-  if (!obj.hasOwnProperty(k)) continue;
+  if (!{}.hasOwnProperty.call(obj, k)) continue;
   k;
 }

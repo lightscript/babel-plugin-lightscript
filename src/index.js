@@ -887,8 +887,14 @@ export default function (babel) {
           t.unaryExpression(
             "!",
             t.callExpression(
-              t.memberExpression(refId, t.identifier("hasOwnProperty")),
-              [ key ]
+              t.memberExpression(
+                t.memberExpression(
+                  t.objectExpression([]),
+                  t.identifier("hasOwnProperty")
+                ),
+                t.identifier("call")
+              ),
+              [ refId, key ]
             )
           ),
           t.continueStatement()
