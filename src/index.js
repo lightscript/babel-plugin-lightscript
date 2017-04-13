@@ -606,6 +606,105 @@ export default function (babel) {
     }
     path.unshiftContainer("body", declarations);
   }
+  
+  function generateForInIterator (path, type: "array" | "object") {
+    let refId;
+  
+    // if the target of iteration is a complex expression,
+    // hoist it into an upper declaration
+    if (!path.get(type).isIdentifier()) {
+      // _arr or _obj
+      refId = path.scope.generateUidIdentifier(type.slice(0, 3));
+      path.insertBefore(
+        t.variableDeclaration("const", [
+          t.variableDeclarator(
+            refId,
+            path.node[type]
+          )
+        ])
+      );
+    } else {
+      refId = path.node[type]
+    }
+  
+    let idx = path.node.idx || path.scope.generateUidIdentifier("i");
+    let keys = path.scope.generateUidIdentifier("keys");
+    let len = path.scope.generateUidIdentifier("len");
+  
+    if (type === "object") {
+      let outerDeclarations = [
+        t.variableDeclarator(keys,
+          t.callExpression(
+            t.memberExpression(
+              t.identifier("Object"),
+              t.identifier("keys")),
+            [refId]
+          )
+        ),
+        t.variableDeclarator(len,
+          t.memberExpression(keys, t.identifier("length"))
+        )
+      ];
+  
+      path.insertBefore(
+        t.variableDeclaration("const", outerDeclarations)
+      );
+    } else {
+      let outerDeclarations = [
+        t.variableDeclarator(
+          len,
+          t.memberExpression(refId, t.identifier("length"))
+        )
+      ];
+  
+      path.insertBefore(
+        t.variableDeclaration("const", outerDeclarations)
+      )
+    }
+  
+    let init = t.variableDeclaration("let", [
+      t.variableDeclarator(idx, t.numericLiteral(0))
+    ])
+    // _i < _len
+    let test = t.binaryExpression("<", idx, len);
+    // _i++
+    let update = t.updateExpression("++", idx);
+  
+    ensureBlockBody(path);
+    let innerDeclarations = [];
+    if (type === "object") {
+      let key = path.node.key || path.scope.generateUidIdentifier("k");
+      innerDeclarations.push(
+        t.variableDeclarator(key, t.memberExpression(keys, idx, true))
+      );
+  
+      if (path.node.val) {
+        innerDeclarations.push(
+          t.variableDeclarator(
+            path.node.val,
+            t.memberExpression(refId, key, true)
+          )
+        );
+      }
+  
+      let declarations = t.variableDeclaration("const", innerDeclarations);
+      path.get("body").unshiftContainer("body", declarations);
+    } else if (type === "array") {
+      if (path.node.elem) {
+        innerDeclarations.push(
+          t.variableDeclarator(
+            path.node.elem,
+            t.memberExpression(refId, idx, true)
+          )
+        );
+  
+        let declarations = t.variableDeclaration("const", innerDeclarations);
+        path.get("body").unshiftContainer("body", declarations);
+      }
+    }
+  
+    return t.forStatement(init, test, update, path.node.body);
+  }
 
   // TYPE DEFINITIONS
   definePluginType("ForInArrayStatement", {
@@ -821,102 +920,11 @@ export default function (babel) {
     path.traverse({
 
       ForInArrayStatement(path) {
-        // If array is a complex expression, generate: const _arr = expr
-        let refId;
-        if (!path.get("array").isIdentifier()) {
-          refId = path.scope.generateUidIdentifier("arr");
-          path.insertBefore(
-            t.variableDeclaration("const", [ t.variableDeclarator(refId, path.node.array )])
-          );
-        } else {
-          refId = path.node.array;
-        }
-
-        // let _i = 0, _len = array.length
-        let idx = path.node.idx || path.scope.generateUidIdentifier("i");
-        let len = path.scope.generateUidIdentifier("len");
-        let declarations = [
-          t.variableDeclarator(idx, t.numericLiteral(0)),
-          t.variableDeclarator(
-            len,
-            t.memberExpression(refId, t.identifier("length"))
-          )
-        ];
-        let init = t.variableDeclaration("let", declarations);
-        // _i < _len
-        let test = t.binaryExpression("<", idx, len);
-        // _i++
-        let update = t.updateExpression("++", idx);
-
-        // Element initializer: const elem = _array[_i]
-        let assignElemStmt = null;
-        if (path.node.elem) {
-          // TODO: note that destructuring takes place here for when we add that to the parser.
-          // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignElemStmt = t.variableDeclaration("const", [
-            t.variableDeclarator(path.node.elem, t.memberExpression(refId, idx, true))
-          ]);
-        }
-
-        ensureBlockBody(path);
-        if (assignElemStmt) path.get("body").unshiftContainer("body", assignElemStmt);
-
-        let forNode = t.forStatement(init, test, update, path.node.body);
-        path.replaceWith(forNode);
+        path.replaceWith(generateForInIterator(path, "array"));
       },
 
       ForInObjectStatement(path) {
-        let refId;
-
-        // If object is a complex expression, generate: const _obj = expr
-        if (!path.get("object").isIdentifier()) {
-          refId = path.scope.generateUidIdentifier("obj");
-          path.insertBefore(
-            t.variableDeclaration("const", [ t.variableDeclarator(refId, path.node.object )])
-          );
-        } else {
-          refId = path.node.object;
-        }
-
-        // Loop initializer: const _k
-        let key = path.node.key || path.scope.generateUidIdentifier("k");
-        let init = t.variableDeclaration("const", [ t.variableDeclarator(key, null) ]);
-
-        // if(!_obj.hasOwnProperty(_k)) continue
-        const hasOwnPropertyStmt = t.ifStatement(
-          t.unaryExpression(
-            "!",
-            t.callExpression(
-              t.memberExpression(
-                t.memberExpression(
-                  t.objectExpression([]),
-                  t.identifier("hasOwnProperty")
-                ),
-                t.identifier("call")
-              ),
-              [ refId, key ]
-            )
-          ),
-          t.continueStatement()
-        );
-
-        // Element initializer: const val = _obj[_k]
-        let assignValStmt = null;
-        if (path.node.val) {
-          // TODO: note that destructuring takes place here for when we add that to the parser.
-          // can probably just pass the destructuring thing to the LHS of the declarator.
-          assignValStmt = t.variableDeclaration("const", [
-            t.variableDeclarator(path.node.val, t.memberExpression(refId, key, true))
-          ]);
-        }
-
-        // Add hasOwnProperty, followed by element initializer, to loop body
-        ensureBlockBody(path);
-        if (assignValStmt) path.get("body").unshiftContainer("body", assignValStmt);
-        path.get("body").unshiftContainer("body", hasOwnPropertyStmt);
-
-        let forNode = t.forInStatement(init, refId, path.node.body);
-        path.replaceWith(forNode);
+        path.replaceWith(generateForInIterator(path, "object"));
       },
 
       ArrayComprehension(path) {

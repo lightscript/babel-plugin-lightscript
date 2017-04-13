@@ -1,7 +1,10 @@
 const _obj = slowRunningFunction();
 
-for (const k in _obj) {
-  if (!{}.hasOwnProperty.call(_obj, k)) continue;
-  const v = _obj[k];
+const _keys = Object.keys(_obj),
+      _len = _keys.length;
+
+for (let _i = 0; _i < _len; _i++) {
+  const k = _keys[_i],
+        v = _obj[k];
   k;
 }

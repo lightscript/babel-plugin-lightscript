@@ -3,8 +3,12 @@
 
   const _arr2 = Array(10);
 
-  for (let i = 0, _len = _arr2.length; i < _len; i++) {
-    for (let j = 0, _len2 = a.length; j < _len2; j++) {
+  const _len = _arr2.length;
+
+  for (let i = 0; i < _len; i++) {
+    const _len2 = a.length;
+
+    for (let j = 0; j < _len2; j++) {
       if (i < 5) {
         function f() {
           return (() => {
@@ -12,7 +16,9 @@
 
             const _arr3 = Array(10);
 
-            for (let k = 0, _len3 = _arr3.length; k < _len3; k++) {
+            const _len3 = _arr3.length;
+
+            for (let k = 0; k < _len3; k++) {
               if (k > 7) {
                 _obj[k] = function g() {
                   return function h() {

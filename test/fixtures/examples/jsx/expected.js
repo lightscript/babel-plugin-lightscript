@@ -33,8 +33,9 @@ const ThingsList3 = ({ things, selectedId }) => {
   return <ul>
     {(() => {
       const _arr2 = [];
+      const _len = things.length;
 
-      for (let _i = 0, _len = things.length; _i < _len; _i++) {
+      for (let _i = 0; _i < _len; _i++) {
         const thing = things[_i];
 
         if (thing.id === selectedId && otherCondition()) {

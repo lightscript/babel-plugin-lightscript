@@ -3,7 +3,9 @@
 
   const _arr = Array(3);
 
-  for (let i = 0, _len = _arr.length; i < _len; i++) {
+  const _len = _arr.length;
+
+  for (let i = 0; i < _len; i++) {
     const x = g(i);
 
     _obj[i] = function g(x) {

@@ -1,3 +1,3 @@
 {
-  "throws": "`k` is shadowed"
+  "throws": "Duplicate declaration \"k\""
 }

@@ -1,9 +1,13 @@
 const _arr = Array(10);
 
-for (let i = 0, _len = _arr.length; i < _len; i++) {
+const _len = _arr.length;
+
+for (let i = 0; i < _len; i++) {
   const _arr2 = Array(10);
 
-  for (let j = 0, _len2 = _arr2.length; j < _len2; j++) {
+  const _len2 = _arr2.length;
+
+  for (let j = 0; j < _len2; j++) {
     if (i > 3) i;
   }
 }
