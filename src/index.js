@@ -630,9 +630,13 @@ export default function (babel) {
     let idx = path.node.idx || path.scope.generateUidIdentifier("i");
     let keys = path.scope.generateUidIdentifier("keys");
     let len = path.scope.generateUidIdentifier("len");
+    
+    let initDeclarations = [
+      t.variableDeclarator(idx, t.numericLiteral(0))
+    ]
   
     if (type === "object") {
-      let outerDeclarations = [
+      initDeclarations.push(
         t.variableDeclarator(keys,
           t.callExpression(
             t.memberExpression(
@@ -644,27 +648,17 @@ export default function (babel) {
         t.variableDeclarator(len,
           t.memberExpression(keys, t.identifier("length"))
         )
-      ];
-  
-      path.insertBefore(
-        t.variableDeclaration("const", outerDeclarations)
       );
     } else {
-      let outerDeclarations = [
+      initDeclarations.push(
         t.variableDeclarator(
           len,
           t.memberExpression(refId, t.identifier("length"))
         )
-      ];
-  
-      path.insertBefore(
-        t.variableDeclaration("const", outerDeclarations)
-      )
+      );
     }
   
-    let init = t.variableDeclaration("let", [
-      t.variableDeclarator(idx, t.numericLiteral(0))
-    ])
+    let init = t.variableDeclaration("let", initDeclarations)
     // _i < _len
     let test = t.binaryExpression("<", idx, len);
     // _i++
@@ -689,7 +683,7 @@ export default function (babel) {
   
       let declarations = t.variableDeclaration("const", innerDeclarations);
       path.get("body").unshiftContainer("body", declarations);
-    } else if (type === "array") {
+    } else {
       if (path.node.elem) {
         innerDeclarations.push(
           t.variableDeclarator(
