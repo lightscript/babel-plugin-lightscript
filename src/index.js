@@ -644,19 +644,19 @@ export default function (babel) {
               t.identifier("keys")),
             [refId]
           )
-        ),
-        t.variableDeclarator(len,
-          t.memberExpression(keys, t.identifier("length"))
-        )
-      );
-    } else {
-      initDeclarations.push(
-        t.variableDeclarator(
-          len,
-          t.memberExpression(refId, t.identifier("length"))
         )
       );
     }
+    
+    initDeclarations.push(
+      t.variableDeclarator(
+        len,
+        t.memberExpression(
+          type === "object" ? keys : refId,
+          t.identifier("length")
+        )
+      )
+    );
   
     let init = t.variableDeclaration("let", initDeclarations)
     // _i < _len
