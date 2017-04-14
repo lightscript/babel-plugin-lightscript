@@ -1078,8 +1078,12 @@ export default function (babel) {
             addImplicitReturns(path);
           }
 
-          // somehow this wasn't being done... may signal deeper issues...
-          path.getFunctionParent().scope.registerDeclaration(path);
+          // As this is an exit visitor, other LSC transforms have reduced
+          // arrows to plain FunctionDeclarations by this point.
+          if (path.node.type === "FunctionDeclaration") {
+            // somehow this wasn't being done... may signal deeper issues...
+            path.getFunctionParent().scope.registerDeclaration(path);
+          }
         }
       },
 
