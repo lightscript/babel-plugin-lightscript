@@ -608,20 +608,19 @@ export default function (babel) {
   }
 
   function generateForInIterator (path, type: "array" | "object") {
-    let idx = path.node.idx || path.scope.generateUidIdentifier("i");
-    let keys = path.scope.generateUidIdentifier("keys");
-    let len = path.scope.generateUidIdentifier("len");
+    const idx = path.node.idx || path.scope.generateUidIdentifier("i");
+    const len = path.scope.generateUidIdentifier("len");
 
-    let initDeclarations = [
+    const initDeclarations = [
       t.variableDeclarator(idx, t.numericLiteral(0))
-    ]
+    ];
 
-    let refId = path.node[type];
-
-    // if the target of iteration is a complex expression,
-    // hoist it into an upper declaration
-    if (!path.get(type).isIdentifier()) {
-      // _arr or _obj
+    let refId;
+    if (path.get(type).isIdentifier()) {
+      refId = path.node[type];
+    } else {
+      // if the target of iteration is a complex expression,
+      // create a reference so it only evaluates once
       refId = path.scope.generateUidIdentifier(type.slice(0, 3));
       initDeclarations.unshift(
         t.variableDeclarator(
@@ -631,7 +630,9 @@ export default function (babel) {
       );
     }
 
+    let keys;
     if (type === "object") {
+      keys = path.scope.generateUidIdentifier("keys");
       initDeclarations.push(
         t.variableDeclarator(keys,
           t.callExpression(
@@ -654,16 +655,16 @@ export default function (babel) {
       )
     );
 
-    let init = t.variableDeclaration("let", initDeclarations);
+    const init = t.variableDeclaration("let", initDeclarations);
     // _i < _len
-    let test = t.binaryExpression("<", idx, len);
+    const test = t.binaryExpression("<", idx, len);
     // _i++
-    let update = t.updateExpression("++", idx);
+    const update = t.updateExpression("++", idx);
 
     ensureBlockBody(path);
-    let innerDeclarations = [];
+    const innerDeclarations = [];
     if (type === "object") {
-      let key = path.node.key || path.scope.generateUidIdentifier("k");
+      const key = path.node.key || path.scope.generateUidIdentifier("k");
       innerDeclarations.push(
         t.variableDeclarator(key, t.memberExpression(keys, idx, true))
       );
@@ -677,7 +678,7 @@ export default function (babel) {
         );
       }
 
-      let declarations = t.variableDeclaration("const", innerDeclarations);
+      const declarations = t.variableDeclaration("const", innerDeclarations);
       path.get("body").unshiftContainer("body", declarations);
     } else {
       if (path.node.elem) {
@@ -688,7 +689,7 @@ export default function (babel) {
           )
         );
 
-        let declarations = t.variableDeclaration("const", innerDeclarations);
+        const declarations = t.variableDeclaration("const", innerDeclarations);
         path.get("body").unshiftContainer("body", declarations);
       }
     }
