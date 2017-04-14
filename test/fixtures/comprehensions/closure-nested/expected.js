@@ -1,9 +1,7 @@
 (() => {
   const _arr = [];
 
-  const _arr2 = Array(10);
-
-  for (let i = 0, _len = _arr2.length; i < _len; i++) {
+  for (let _arr2 = Array(10), i = 0, _len = _arr2.length; i < _len; i++) {
     function f() {
       return function g() {
         return i;
