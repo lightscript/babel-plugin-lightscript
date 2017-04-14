@@ -662,41 +662,41 @@ export default function (babel) {
     // _i++
     const update = t.updateExpression("++", idx);
 
-    const unshiftToBody = node => {
-      path.get("body").unshiftContainer("body", node);
-    };
-
     ensureBlockBody(path);
+    const innerDeclarations = [];
     if (type === "object") {
       const key = path.node.key || path.scope.generateUidIdentifier("k");
+      innerDeclarations.push(
+        t.variableDeclaration("const", [
+          t.variableDeclarator(key, t.memberExpression(keys, idx, true))
+        ])
+      );
 
       if (path.node.val) {
-        const valDecl = t.variableDeclaration("const", [
-          t.variableDeclarator(
-            path.node.val,
-            t.memberExpression(refId, key, true)
-          )
-        ]);
-
-        unshiftToBody(valDecl);
+        innerDeclarations.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              path.node.val,
+              t.memberExpression(refId, key, true)
+            )
+          ])
+        );
       }
-
-      const keyDecl = t.variableDeclaration("const", [
-        t.variableDeclarator(key, t.memberExpression(keys, idx, true))
-      ]);
-
-      unshiftToBody(keyDecl);
     } else {
       if (path.node.elem) {
-        const elemDecl = t.variableDeclaration("const", [
-          t.variableDeclarator(
-            path.node.elem,
-            t.memberExpression(refId, idx, true)
-          )
-        ]);
-
-        unshiftToBody(elemDecl);
+        innerDeclarations.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              path.node.elem,
+              t.memberExpression(refId, idx, true)
+            )
+          ])
+        );
       }
+    }
+
+    if (innerDeclarations.length > 0) {
+      path.get("body").unshiftContainer("body", innerDeclarations);
     }
 
     return t.forStatement(init, test, update, path.node.body);
