@@ -621,7 +621,8 @@ export default function (babel) {
     } else {
       // if the target of iteration is a complex expression,
       // create a reference so it only evaluates once
-      refId = path.scope.generateUidIdentifier(type.slice(0, 3));
+      const refName = type === "object" ? "obj" : "arr";
+      refId = path.scope.generateUidIdentifier(refName);
       initDeclarations.unshift(
         t.variableDeclarator(
           refId,
@@ -661,36 +662,40 @@ export default function (babel) {
     // _i++
     const update = t.updateExpression("++", idx);
 
+    const unshiftToBody = node => {
+      path.get("body").unshiftContainer("body", node);
+    };
+
     ensureBlockBody(path);
-    const innerDeclarations = [];
     if (type === "object") {
       const key = path.node.key || path.scope.generateUidIdentifier("k");
-      innerDeclarations.push(
-        t.variableDeclarator(key, t.memberExpression(keys, idx, true))
-      );
 
       if (path.node.val) {
-        innerDeclarations.push(
+        const valDecl = t.variableDeclaration("const", [
           t.variableDeclarator(
             path.node.val,
             t.memberExpression(refId, key, true)
           )
-        );
+        ]);
+
+        unshiftToBody(valDecl);
       }
 
-      const declarations = t.variableDeclaration("const", innerDeclarations);
-      path.get("body").unshiftContainer("body", declarations);
+      const keyDecl = t.variableDeclaration("const", [
+        t.variableDeclarator(key, t.memberExpression(keys, idx, true))
+      ]);
+
+      unshiftToBody(keyDecl);
     } else {
       if (path.node.elem) {
-        innerDeclarations.push(
+        const elemDecl = t.variableDeclaration("const", [
           t.variableDeclarator(
             path.node.elem,
             t.memberExpression(refId, idx, true)
           )
-        );
+        ]);
 
-        const declarations = t.variableDeclaration("const", innerDeclarations);
-        path.get("body").unshiftContainer("body", declarations);
+        unshiftToBody(elemDecl);
       }
     }
 
