@@ -574,9 +574,43 @@ export default function (babel) {
     }
   }
 
+  function makeInlineStdlibFn(inlineFnName) {
+    const fnId = t.identifier(inlineFnName);
+    const aParam = t.identifier("a");
+    const bParam = t.identifier("b");
+    const op = {
+      "looseEq": "==",
+      "looseNotEq": "!=",
+      "bitwiseNot": "~",
+      "bitwiseAnd": "&",
+      "bitwiseOr": "|",
+      "bitwiseXor": "^",
+      "bitwiseLeftShift": "<<",
+      "bitwiseRightShift": ">>",
+      "bitwiseZeroFillRightShift": ">>>",
+    }[inlineFnName];
+
+    // bitwiseNot is the only unary fn; rest are binary.
+    if (inlineFnName === "bitwiseNot") {
+      return t.functionDeclaration(fnId, [aParam], t.blockStatement([
+        t.returnStatement(t.unaryExpression(op, aParam)),
+      ]));
+    }
+
+    return t.functionDeclaration(fnId, [aParam, bParam], t.blockStatement([
+      t.returnStatement(t.binaryExpression(op, aParam, bParam)),
+    ]));
+  }
+
   function insertStdlibImports(path, imports: Imports, useRequire) {
     const declarations = [];
+    const inlines = [];
     for (const importPath in imports) {
+      if (importPath === "inline") {
+        inlines.push(...imports[importPath]);
+        continue;
+      }
+
       const specifierNames = imports[importPath];
       const specifiers = [];
 
@@ -605,6 +639,20 @@ export default function (babel) {
       }
     }
     path.unshiftContainer("body", declarations);
+
+    if (inlines.length) {
+      const inlineDeclarations = [];
+      for (const inlineFnName of inlines) {
+        inlineDeclarations.push(makeInlineStdlibFn(inlineFnName));
+      }
+      // insert inline fns before the first statement which isn't an import statement
+      for (const p of path.get("body")) {
+        if (!p.isImportDeclaration()) {
+          p.insertBefore(inlineDeclarations);
+          break;
+        }
+      }
+    }
   }
 
   function generateForInIterator (path, type: "array" | "object") {

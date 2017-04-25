@@ -1,7 +1,10 @@
-const {
-  looseEq,
-  looseNotEq
-} = require('babel-plugin-lightscript/stdlib');
+function looseEq(a, b) {
+  return a == b;
+}
+
+function looseNotEq(a, b) {
+  return a != b;
+}
 
 const {
   map,
