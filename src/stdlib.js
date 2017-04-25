@@ -1,15 +1,15 @@
 
-export function looseEq(a, b) {
-  return a == b;
-}
-
-export function looseNotEq(a, b) {
-  return a != b;
-}
-
-export function bitwiseNot(a) {
-  return ~a;
-}
+export const lightscriptImports = {
+  "looseEq": "inline",
+  "looseNotEq": "inline",
+  "bitwiseNot": "inline",
+  "bitwiseAnd": "inline",
+  "bitwiseOr": "inline",
+  "bitwiseXor": "inline",
+  "bitwiseLeftShift": "inline",
+  "bitwiseRightShift": "inline",
+  "bitwiseZeroFillRightShift": "inline",
+};
 
 export const everyLodashMethod = [
   "add",
@@ -319,12 +319,6 @@ export const everyLodashMethod = [
   "zipObjectDeep",
   "zipWith",
 ];
-
-export const lightscriptImports = {
-  "looseEq": "babel-plugin-lightscript/stdlib",
-  "looseNotEq": "babel-plugin-lightscript/stdlib",
-  "bitwiseNot": "babel-plugin-lightscript/stdlib",
-};
 
 export const lodashImports = everyLodashMethod.reduce((obj, methodName) => {
   obj[methodName] = "lodash";
