@@ -1,6 +1,5 @@
 language: node_js
 node_js:
-  - '4'
   - '6'
   - '7'
 
@@ -8,6 +7,7 @@ before_script:
   - npm run build
   - npm link
   - npm link babel-plugin-lightscript
+  - npm run build
 
 notifications:
   email: false
