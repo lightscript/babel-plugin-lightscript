@@ -16,4 +16,4 @@ function uniq(x) {
   return x;
 }
 
-uniq(map([.1, .2, .5, .9], round));
+uniq(map([0.1, 0.2, 0.5, 0.9], round));
