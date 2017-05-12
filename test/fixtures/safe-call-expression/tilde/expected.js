@@ -1,0 +1,1 @@
+typeof b === "function" ? b(a, c) : null;

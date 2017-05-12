@@ -750,6 +750,37 @@ export default function (babel) {
     return t.forStatement(init, test, update, path.node.body);
   }
 
+  function replaceWithSafeCall(path, callExpr) {
+    const exprs = [];
+    let ref;
+
+    // If callee is a complex expression, create a ref.
+    // XXX: t.isIdentifier() doesn't work here because of the babel-types
+    // hacks above.
+    if (callExpr.callee.type === "Identifier") {
+      ref = callExpr.callee;
+    } else {
+      ref = path.scope.generateDeclaredUidIdentifier("ref");
+      exprs.push(t.assignmentExpression("=", ref, callExpr.callee));
+    }
+
+    // Generate actual safecall expr
+    // f?(x) -> (typeof f === "function") ? f(x) : null
+    exprs.push(
+      t.conditionalExpression(
+        t.binaryExpression("===",
+          t.unaryExpression("typeof", ref),
+          t.stringLiteral("function")
+        ),
+        t.callExpression(ref, callExpr.arguments),
+        t.nullLiteral()
+      )
+    );
+
+    // Replace, using seqexpr if needed
+    path.replaceWith( (exprs.length > 1) ? t.sequenceExpression(exprs) : exprs[0] );
+  }
+
   // TYPE DEFINITIONS
   definePluginType("ForInArrayStatement", {
     visitor: ["idx", "elem", "array", "body"],
@@ -952,6 +983,17 @@ export default function (babel) {
     aliases: ["MemberExpression", "Expression", "LVal"],
   });
 
+  definePluginType("ExistentialExpression", {
+    builder: ["argument"],
+    visitor: ["argument"],
+    aliases: ["Expression"],
+    fields: {
+      argument: {
+        validate: assertNodeType("Expression"),
+      }
+    }
+  });
+
   // traverse as top-level item so as to run before other babel plugins
   // (and avoid traversing any of their output)
   function Program(path, state) {
@@ -1021,8 +1063,21 @@ export default function (babel) {
             path.node.left,
             ...path.node.arguments,
           ]);
-          path.replaceWith(callExpr);
+
+          if (path.node.safe) {
+            replaceWithSafeCall(path, callExpr);
+          } else {
+            path.replaceWith(callExpr);
+          }
         },
+      },
+
+      CallExpression: {
+        exit(path) {
+          if (path.node.safe) {
+            replaceWithSafeCall(path, path.node);
+          }
+        }
       },
 
       NamedArrowFunction(path) {
@@ -1250,6 +1305,15 @@ export default function (babel) {
         }
       },
 
+      ExistentialExpression(path) {
+        path.replaceWith(
+          t.binaryExpression(
+            "!=",
+            path.get("argument").node,
+            t.nullLiteral()
+          )
+        );
+      },
 
     });
 
