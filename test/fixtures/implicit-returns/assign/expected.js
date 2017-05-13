@@ -1,4 +1,3 @@
 function fn(x) {
-  x = 4;
-  return x;
+  return x = 4;
 }

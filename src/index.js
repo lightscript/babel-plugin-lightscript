@@ -195,12 +195,7 @@ export default function (babel) {
       if (!tailPath) continue;
 
       if (tailPath.isExpressionStatement()) {
-        // TODO: add linting to discourage
-        if (tailPath.get("expression").isAssignmentExpression()) {
-          tailPath.insertAfter(getNewNode(tailPath.node.expression.left, tailPath));
-        } else {
-          tailPath.replaceWith(getNewNode(tailPath.node.expression, tailPath));
-        }
+        tailPath.replaceWith(getNewNode(tailPath.node.expression, tailPath));
       } else if (tailPath.isVariableDeclaration()) {
         // TODO: handle declarations.length > 1
         // TODO: add linting to discourage
