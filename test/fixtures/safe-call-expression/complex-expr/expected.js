@@ -1,3 +1,3 @@
-var _ref, _ref2;
+var _obj;
 
-(_ref = a(b, c != null, d).e, typeof _ref === "function" ? _ref(f, g != null) : null) ? h : (_ref2 = k.l, typeof _ref2 === "function" ? _ref2(typeof i === "function" ? i(j) : null, m != null) : null);
+(typeof (_obj = a(b, c != null, d)).e === "function" ? _obj.e(f, g != null) : null) ? h : typeof k.l === "function" ? k.l(typeof i === "function" ? i(j) : null, m != null) : null;

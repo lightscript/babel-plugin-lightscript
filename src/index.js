@@ -752,16 +752,35 @@ export default function (babel) {
 
   function replaceWithSafeCall(path, callExpr) {
     const exprs = [];
-    let ref;
+    let callee;
+    let typeofExpr;
 
     // If callee is a complex expression, create a ref.
-    // XXX: t.isIdentifier() doesn't work here because of the babel-types
-    // hacks above.
     if (callExpr.callee.type === "Identifier") {
-      ref = callExpr.callee;
+      callee = typeofExpr = callExpr.callee;
+    } else if (callExpr.callee.type === "MemberExpression") {
+      const memberExpr = callExpr.callee;
+      let objectRef, propertyRef, object, property;
+
+      if (memberExpr.object.type === "Identifier") {
+        objectRef = object = memberExpr.object;
+      } else {
+        objectRef = path.scope.generateDeclaredUidIdentifier("obj");
+        object = t.assignmentExpression("=", objectRef, memberExpr.object);
+      }
+
+      if (memberExpr.computed && memberExpr.property.type !== "Identifier") {
+        propertyRef = path.scope.generateDeclaredUidIdentifier("prop");
+        property = t.assignmentExpression("=", propertyRef, memberExpr.property);
+      } else {
+        propertyRef = property = memberExpr.property;
+      }
+
+      typeofExpr = t.memberExpression(object, property, memberExpr.computed);
+      callee = t.memberExpression(objectRef, propertyRef, memberExpr.computed);
     } else {
-      ref = path.scope.generateDeclaredUidIdentifier("ref");
-      exprs.push(t.assignmentExpression("=", ref, callExpr.callee));
+      callee = typeofExpr = path.scope.generateDeclaredUidIdentifier("ref");
+      exprs.push(t.assignmentExpression("=", callee, callExpr.callee));
     }
 
     // Generate actual safecall expr
@@ -769,10 +788,10 @@ export default function (babel) {
     exprs.push(
       t.conditionalExpression(
         t.binaryExpression("===",
-          t.unaryExpression("typeof", ref),
+          t.unaryExpression("typeof", typeofExpr),
           t.stringLiteral("function")
         ),
-        t.callExpression(ref, callExpr.arguments),
+        t.callExpression(callee, callExpr.arguments),
         t.nullLiteral()
       )
     );
