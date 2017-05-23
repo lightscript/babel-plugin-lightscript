@@ -1,6 +1,6 @@
 {
   "name": "babel-plugin-lightscript",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Compile LightScript to JavaScript.",
   "main": "index.js",
   "engines": {
