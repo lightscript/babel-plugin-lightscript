@@ -10,6 +10,7 @@
     "test": "mocha test",
     "test:debug": "node --inspect --debug-brk mocha test",
     "build": "babel src --out-dir .",
+    "start": "babel src --out-dir . --watch",
     "preversion": "npm run build && npm test"
   },
   "author": "Alex Rattray <rattray.alex@gmail.com> (http://alexrattray.com/)",
