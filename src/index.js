@@ -517,6 +517,8 @@ export default function (babel) {
     const { filename } = file.opts;
     // HACK: for lightscript-eslint, and possibly others
     if (filename === "unknown") return true;
+    // for babel-node repl
+    if (filename === "repl") return true;
 
     // TODO: consider "peeking" at the first line for a shebang or 'use lightscript' directive.
     return (
