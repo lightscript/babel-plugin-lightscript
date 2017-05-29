@@ -214,6 +214,9 @@ export default function (babel) {
 
   function validateComprehensionLoopBody(loopBodyPath) {
     loopBodyPath.traverse({
+      Function(fnPath) {
+        fnPath.skip();
+      },
       AwaitExpression(awaitPath) {
         throw awaitPath.buildCodeFrameError(
           "`await` is not allowed within Comprehensions; " +
