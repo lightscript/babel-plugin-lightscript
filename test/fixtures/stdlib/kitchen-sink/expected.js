@@ -1,4 +1,5 @@
-import { map, round } from 'lodash';
+import map from 'lodash/map';
+import round from 'lodash/round';
 
 function looseEq(a, b) {
   return a == b;

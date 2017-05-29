@@ -618,30 +618,32 @@ export default function (babel) {
       }
 
       const specifierNames = imports[importPath];
-      const specifiers = [];
 
       if (useRequire) {
         // eg; `const { map, uniq } = require('lodash');`
         for (const specifierName of specifierNames) {
           const importIdentifier = t.identifier(specifierName);
-          specifiers.push(t.objectProperty(importIdentifier, importIdentifier, false, true));
+
+          const requireCall = t.callExpression(t.identifier("require"), [
+            t.stringLiteral(importPath + '/' + specifierName)
+          ]);
+          const requireStmt = t.variableDeclaration("const", [
+            t.variableDeclarator(importIdentifier, requireCall),
+          ]);
+
+          declarations.push(requireStmt);
         }
-        const requirePattern = t.objectPattern(specifiers);
-        const requireCall = t.callExpression(t.identifier("require"), [
-          t.stringLiteral(importPath)
-        ]);
-        const requireStmt = t.variableDeclaration("const", [
-          t.variableDeclarator(requirePattern, requireCall),
-        ]);
-        declarations.push(requireStmt);
       } else {
         // eg; `import { map, uniq } from 'lodash';`
         for (const specifierName of specifierNames) {
           const importIdentifier = t.identifier(specifierName);
-          specifiers.push(t.importSpecifier(importIdentifier, importIdentifier));
+          const importSpecifier = t.importDefaultSpecifier(importIdentifier);
+          const importDeclaration = t.importDeclaration(
+            [importSpecifier],
+            t.stringLiteral(importPath + '/' + specifierName)
+          );
+          declarations.push(importDeclaration);
         }
-        const importDeclaration = t.importDeclaration(specifiers, t.stringLiteral(importPath));
-        declarations.push(importDeclaration);
       }
     }
     path.unshiftContainer("body", declarations);
