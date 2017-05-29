@@ -367,6 +367,9 @@ export default function (babel) {
   function containsSuperCall(path) {
     let hasSuper = false;
     path.traverse({
+      Class(classPath) {
+        classPath.skip();
+      },
       Super(superPath) {
         if (superPath.parentPath.isCallExpression()) {
           hasSuper = true;
@@ -428,6 +431,9 @@ export default function (babel) {
     // directly after each instance of super(), insert the thingies there.
     if (node.superClass) {
       constructorPath.traverse({
+        Class(classPath) {
+          classPath.skip();
+        },
         Super(superPath) {
           if (!superPath.parentPath.isCallExpression()) return;
           let superStatementPath = superPath.getStatementParent();
