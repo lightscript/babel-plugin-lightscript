@@ -758,6 +758,52 @@ export default function (babel) {
     return t.forStatement(init, test, update, path.node.body);
   }
 
+  function replaceWithSafeCall(path, callExpr) {
+    let callee;
+    let typeofExpr;
+
+    // If callee is a complex expression, create a ref.
+    if (callExpr.callee.type === "Identifier") {
+      callee = typeofExpr = callExpr.callee;
+    } else if (callExpr.callee.type === "MemberExpression") {
+      const memberExpr = callExpr.callee;
+      let objectRef, propertyRef, object, property;
+
+      if (memberExpr.object.type === "Identifier") {
+        objectRef = object = memberExpr.object;
+      } else {
+        objectRef = path.scope.generateDeclaredUidIdentifier("obj");
+        object = t.assignmentExpression("=", objectRef, memberExpr.object);
+      }
+
+      if (memberExpr.computed && memberExpr.property.type !== "Identifier") {
+        propertyRef = path.scope.generateDeclaredUidIdentifier("prop");
+        property = t.assignmentExpression("=", propertyRef, memberExpr.property);
+      } else {
+        propertyRef = property = memberExpr.property;
+      }
+
+      typeofExpr = t.memberExpression(object, property, memberExpr.computed);
+      callee = t.memberExpression(objectRef, propertyRef, memberExpr.computed);
+    } else {
+      callee = typeofExpr = path.scope.generateDeclaredUidIdentifier("ref");
+      typeofExpr = t.assignmentExpression("=", callee, callExpr.callee);
+    }
+
+    // Generate actual safecall expr
+    // f?(x) -> (typeof f === "function") ? f(x) : null
+    path.replaceWith(
+      t.conditionalExpression(
+        t.binaryExpression("===",
+          t.unaryExpression("typeof", typeofExpr),
+          t.stringLiteral("function")
+        ),
+        t.callExpression(callee, callExpr.arguments),
+        t.nullLiteral()
+      )
+    );
+  }
+
   // TYPE DEFINITIONS
   definePluginType("ForInArrayStatement", {
     visitor: ["idx", "elem", "array", "body"],
@@ -960,6 +1006,17 @@ export default function (babel) {
     aliases: ["MemberExpression", "Expression", "LVal"],
   });
 
+  definePluginType("ExistentialExpression", {
+    builder: ["argument"],
+    visitor: ["argument"],
+    aliases: ["Expression"],
+    fields: {
+      argument: {
+        validate: assertNodeType("Expression"),
+      }
+    }
+  });
+
   // traverse as top-level item so as to run before other babel plugins
   // (and avoid traversing any of their output)
   function Program(path, state) {
@@ -1029,8 +1086,21 @@ export default function (babel) {
             path.node.left,
             ...path.node.arguments,
           ]);
-          path.replaceWith(callExpr);
+
+          if (path.node.safe) {
+            replaceWithSafeCall(path, callExpr);
+          } else {
+            path.replaceWith(callExpr);
+          }
         },
+      },
+
+      CallExpression: {
+        exit(path) {
+          if (path.node.safe) {
+            replaceWithSafeCall(path, path.node);
+          }
+        }
       },
 
       NamedArrowFunction(path) {
@@ -1258,6 +1328,15 @@ export default function (babel) {
         }
       },
 
+      ExistentialExpression(path) {
+        path.replaceWith(
+          t.binaryExpression(
+            "!=",
+            path.get("argument").node,
+            t.nullLiteral()
+          )
+        );
+      },
 
     });
 

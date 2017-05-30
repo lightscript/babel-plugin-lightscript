@@ -1,0 +1,1 @@
+typeof obj.method === "function" ? obj.method() : null;
