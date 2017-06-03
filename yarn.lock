@@ -771,9 +771,9 @@ babel-types@^6.21.0, babel-types@^6.22.0, babel-types@^6.23.0:
     lodash "^4.2.0"
     to-fast-properties "^1.0.1"
 
-babylon-lightscript@^0.5.0:
-  version "0.5.0"
-  resolved "https://registry.yarnpkg.com/babylon-lightscript/-/babylon-lightscript-0.5.0.tgz#07bf158be7b7f10cc44afbca844c1c5b491212c0"
+babylon-lightscript@^0.5.6:
+  version "0.5.6"
+  resolved "https://registry.yarnpkg.com/babylon-lightscript/-/babylon-lightscript-0.5.6.tgz#e5aec2825984b0c3d0f7bfbcd071a6ebd9e405c4"
 
 babylon@^6.11.0, babylon@^6.13.0:
   version "6.14.1"
