@@ -255,9 +255,9 @@ export default function (babel) {
     return body;
   }
 
-  function ensureBlockBody(path) {
-    if (!t.isBlockStatement(path.node.body)) {
-      path.get("body").replaceWith(t.blockStatement([path.node.body]));
+  function ensureBlockBody(path, bodyKey = "body") {
+    if (!path.get(bodyKey).isBlockStatement()) {
+      path.get(bodyKey).replaceWith(t.blockStatement([path.node[bodyKey]]));
     }
   }
 
@@ -663,7 +663,7 @@ export default function (babel) {
     }
   }
 
-  function generateForInIterator (path, type: "array" | "object") {
+  function generateForInIterator(path, type: "array" | "object") {
     const idx = path.node.idx || path.scope.generateUidIdentifier("i");
     const len = path.scope.generateUidIdentifier("len");
 
@@ -756,6 +756,117 @@ export default function (babel) {
     }
 
     return t.forStatement(init, test, update, path.node.body);
+  }
+
+  function addAlternateToIfChain(rootIf, alternate) {
+    let tail = rootIf
+    while (tail.alternate) tail = tail.alternate;
+    tail.alternate = alternate;
+    return rootIf;
+  }
+
+  function isUndefined(path) {
+    return path.isIdentifier() && path.node.name === "undefined";
+  }
+
+  function isSignedNumber(path) {
+    return path.isUnaryExpression() &&
+      path.get("argument").isNumericLiteral() &&
+      (path.node.operator === "+" || path.node.operator === "-");
+  }
+
+  function looksLikeClassName(path) {
+    // disallow Foo.Bar for now.
+    if (!path.isIdentifier()) return false;
+    const { name } = path.node;
+    if (name[0].toUpperCase() === name[0]) {
+      // A -> true
+      if (name.length === 1) return true;
+      // ABC -> false, it's a constant
+      if (name.toUpperCase() === name) return false;
+      // Abc -> true
+      return true;
+    }
+    return false;
+  }
+
+  function isPrimitiveClass({ node: { name }}) {
+    switch (name) {
+      case "Number":
+      case "String":
+      case "Boolean":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function transformMatchCaseTest(path, argRef) {
+    if (path.isLogicalExpression()) {
+      transformMatchCaseTest(path.get("left"), argRef);
+      transformMatchCaseTest(path.get("right"), argRef);
+    } else if (path.isUnaryExpression() && path.node.operator === "!") {
+      transformMatchCaseTest(path.get("argument"), argRef);
+    } else if (path.isRegExpLiteral()) {
+      const testCall = t.callExpression(
+        t.memberExpression(path.node, t.identifier("test")),
+        [argRef]
+      );
+      path.replaceWith(testCall);
+    } else if (looksLikeClassName(path)) {
+      const classInstanceCheck = isPrimitiveClass(path)
+        ? t.binaryExpression("===",
+            t.unaryExpression("typeof", argRef),
+            t.stringLiteral(path.node.name.toLowerCase())
+          )
+        : t.binaryExpression("instanceof", argRef, path.node)
+      path.replaceWith(classInstanceCheck);
+    } else if (path.isLiteral() || isUndefined(path) || isSignedNumber(path)) {
+      const isEq = t.binaryExpression("===", argRef, path.node);
+      path.replaceWith(isEq);
+    }
+  }
+
+  function transformMatchCases(argRef, cases) {
+    return cases.reduce((rootIf, path) => {
+
+      // fill in placeholders
+      path.get("test").traverse({
+        PlaceholderExpression(placeholderPath) {
+          placeholderPath.replaceWith(argRef);
+        }
+      });
+
+      // add in ===, etc
+      transformMatchCaseTest(path.get("test"), argRef);
+
+      // add binding (and always use block bodies)
+      ensureBlockBody(path, "consequent");
+      if (path.node.binding) {
+        const bindingDecl = t.variableDeclaration("const", [
+          t.variableDeclarator(path.node.binding, argRef)
+        ]);
+        path.get("consequent").unshiftContainer("body", bindingDecl);
+      }
+
+      // handle `else`
+      if (path.node.test.type === "MatchElse") {
+        if (rootIf) {
+          return addAlternateToIfChain(rootIf, path.node.consequent);
+        } else {
+          // single match case with "else", weird. Just generate an anonymous block for now.
+          return path.node.consequent;
+        }
+      }
+
+      // generate `if` and append to if-else chain
+      const ifStmt = t.ifStatement(path.node.test, path.node.consequent);
+      if (!rootIf) {
+        return ifStmt;
+      } else {
+        return addAlternateToIfChain(rootIf, ifStmt);
+      }
+    }, null);
   }
 
   // TYPE DEFINITIONS
@@ -958,6 +1069,55 @@ export default function (babel) {
   definePluginType("SafeMemberExpression", {
     inherits: "MemberExpression",
     aliases: ["MemberExpression", "Expression", "LVal"],
+  });
+
+  definePluginType("MatchExpression", {
+    builder: ["discriminant", "cases"],
+    visitor: ["discriminant", "cases"],
+    aliases: ["Expression", "Conditional"],
+    fields: {
+      discriminant: {
+        validate: assertNodeType("Expression")
+      },
+      cases: {
+        validate: chain(assertValueType("array"), assertEach(assertNodeType("MatchCase")))
+      }
+    }
+  });
+
+  definePluginType("MatchStatement", {
+    builder: ["discriminant", "cases"],
+    visitor: ["discriminant", "cases"],
+    aliases: ["Statement", "Conditional"],
+    fields: {
+      discriminant: {
+        validate: assertNodeType("Expression")
+      },
+      cases: {
+        validate: chain(assertValueType("array"), assertEach(assertNodeType("MatchCase")))
+      }
+    }
+  });
+
+  definePluginType("MatchCase", {
+    builder: ["test", "consequent", "functional"],
+    visitor: ["test", "consequent"],
+    fields: {
+      test: {
+        validate: assertNodeType("Expression", "MatchElse")
+      },
+      consequent: {
+        validate: assertNodeType("BlockStatement", "ExpressionStatement")
+      }
+    }
+  });
+
+  definePluginType("MatchElse", {
+    // only allowed in MatchCase, so don't alias to Expression
+  });
+
+  definePluginType("PlaceholderExpression", {
+    aliases: ["Expression"]
   });
 
   // traverse as top-level item so as to run before other babel plugins
@@ -1258,6 +1418,35 @@ export default function (babel) {
         }
       },
 
+      MatchExpression(path) {
+        const { discriminant } = path.node;
+
+        const argRef = path.scope.generateUidIdentifier("it");
+        const matchBody = transformMatchCases(argRef, path.get("cases"));
+
+        const iife = t.callExpression(
+          t.arrowFunctionExpression([argRef], t.blockStatement([matchBody])),
+          [discriminant]
+        );
+        path.replaceWith(iife);
+      },
+
+      MatchStatement(path) {
+        const { discriminant } = path.node;
+
+        let argRef;
+        if (t.isIdentifier(discriminant)) {
+          argRef = discriminant;
+        } else {
+          argRef = path.scope.generateUidIdentifier("it");
+          path.insertBefore(t.variableDeclaration("const", [
+            t.variableDeclarator(argRef, discriminant)
+          ]));
+        }
+
+        const matchBody = transformMatchCases(argRef, path.get("cases"));
+        path.replaceWith(matchBody);
+      },
 
     });
 
