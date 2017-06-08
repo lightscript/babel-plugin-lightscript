@@ -1,5 +1,5 @@
 import { parse } from "babylon-lightscript";
-import { defaultImports, lightscriptImports, lodashImports } from "./stdlib";
+import { defaultImports, lightscriptImports, lodashImports, runtimeHelpers } from "./stdlib";
 
 export default function (babel) {
   const { types: t } = babel;
@@ -580,6 +580,15 @@ export default function (babel) {
     }
   }
 
+  function collectRuntimeHelper(path, helperName) {
+    const programScope = path.scope.getProgramParent();
+    const helpers = programScope.lscRuntimeHelpers;
+    if (!helpers[helperName]) {
+      helpers[helperName] = programScope.generateUidIdentifier(helperName);
+    }
+    return helpers[helperName];
+  }
+
   function makeInlineStdlibFn(inlineFnName) {
     const fnId = t.identifier(inlineFnName);
     const aParam = t.identifier("a");
@@ -606,6 +615,16 @@ export default function (babel) {
     return t.functionDeclaration(fnId, [aParam, bParam], t.blockStatement([
       t.returnStatement(t.binaryExpression(op, aParam, bParam)),
     ]));
+  }
+
+  function insertAfterImports(path, nodes) {
+    // insert inline fns before the first statement which isn't an import statement
+    for (const p of path.get("body")) {
+      if (!p.isImportDeclaration()) {
+        p.insertBefore(nodes);
+        break;
+      }
+    }
   }
 
   function insertStdlibImports(path, imports: Imports, useRequire) {
@@ -653,14 +672,21 @@ export default function (babel) {
       for (const inlineFnName of inlines) {
         inlineDeclarations.push(makeInlineStdlibFn(inlineFnName));
       }
-      // insert inline fns before the first statement which isn't an import statement
-      for (const p of path.get("body")) {
-        if (!p.isImportDeclaration()) {
-          p.insertBefore(inlineDeclarations);
-          break;
-        }
-      }
+      insertAfterImports(path, inlineDeclarations);
     }
+  }
+
+  function insertRuntimeHelpers(path) {
+    const helpers = [];
+    for (const helperName in path.scope.lscRuntimeHelpers) {
+      const fn = runtimeHelpers[helperName];
+      const uid = path.scope.lscRuntimeHelpers[helperName];
+      const fnAST = babel.template(fn.toString())({
+        [helperName]: uid,
+      });
+      helpers.push(fnAST);
+    }
+    insertAfterImports(path, helpers);
   }
 
   function generateForInIterator(path, type: "array" | "object") {
@@ -827,6 +853,103 @@ export default function (babel) {
     }
   }
 
+  function extendAndChain(andChainPath, condition) {
+    if (!andChainPath.node) {
+      andChainPath.replaceWith(condition);
+    } else {
+      andChainPath.replaceWith(t.logicalExpression("&&", andChainPath.node, condition));
+    }
+  }
+
+  function buildAnd(left, right) {
+    if (left && right) {
+      return t.logicalExpression("&&", left, right);
+    } else if (left) {
+      return left;
+    } else if (right) {
+      return right;
+    } else {
+      return t.booleanLiteral(true);
+    }
+  }
+
+  function buildTestForBinding(test, bindingPath, argRef) {
+    if (bindingPath.isObjectPattern()) {
+      const isObjUid = collectRuntimeHelper(bindingPath, "hasProps");
+
+      const propsToCheck = [];
+      const childPatterns = [];  // list of [propName, path] tuples
+      for (const propPath of bindingPath.get("properties")) {
+        const propName = propPath.get("key").node.name;
+
+        if (propPath.get("value").isAssignmentPattern()) {
+          if (propPath.get("value.left").isPattern()) {
+            childPatterns.push([propName, propPath.get("value.left"), propPath.get("value.right").node]);
+          }
+        } else {
+          const propStr = t.stringLiteral(propName);
+          propsToCheck.push(propStr);
+
+          if (propPath.get("value").isPattern()) {
+            childPatterns.push([propName, propPath.get("value")]);
+          }
+        }
+      }
+
+      const isObjCall = t.callExpression(isObjUid, [argRef, t.arrayExpression(propsToCheck)]);
+      test = buildAnd(test, isObjCall);
+
+      for (const [ propName, childPatternPath, defaultObj = null ] of childPatterns) {
+        const propertyArgRef = t.memberExpression(argRef, t.identifier(propName));
+
+        if (defaultObj) {
+          test = buildAnd(test, t.logicalExpression("||",
+            buildTestForBinding(null, childPatternPath, propertyArgRef),
+            buildTestForBinding(null, childPatternPath, defaultObj)
+          ));
+        } else {
+          test = buildTestForBinding(test, childPatternPath, propertyArgRef);
+        }
+      }
+    } else if (bindingPath.isArrayPattern()) {
+      const hasLengthUid = collectRuntimeHelper(bindingPath, "hasLength");
+
+      const childPatterns = []; // list of [index, path] tuples.
+      let minLength = 0;
+      let maxLength = 0;
+      bindingPath.get("elements").forEach((elemPath, i) => {
+        if (elemPath.isAssignmentPattern()) {
+          ++maxLength;
+          if (elemPath.get("left").isPattern()) {
+            childPatterns.push([i, elemPath.get("left")]);
+          }
+        } else if (elemPath.isRestElement()) {
+          maxLength = null;
+        } else {
+          ++minLength;
+          ++maxLength;
+          if (elemPath.isPattern()) {
+            childPatterns.push([i, elemPath]);
+          }
+        }
+      });
+
+      const hasLengthCall = t.callExpression(hasLengthUid, [
+        argRef,
+        t.numericLiteral(minLength),
+        maxLength === null ? null : t.numericLiteral(maxLength)
+      ].filter(x => x !== null));
+      test = buildAnd(test, hasLengthCall);
+
+      for (const [index, childPatternPath] of childPatterns) {
+        const elementArgRef = t.memberExpression(argRef, t.numericLiteral(index), true);
+        test = buildTestForBinding(test, childPatternPath, elementArgRef);
+      }
+    } else throw new TypeError(`Expected Pattern, got ${bindingPath.node.type}`);
+
+    return test;
+  }
+
   function transformMatchCases(argRef, cases) {
     return cases.reduce((rootIf, path) => {
 
@@ -843,6 +966,10 @@ export default function (babel) {
       // add binding (and always use block bodies)
       ensureBlockBody(path, "consequent");
       if (path.node.binding) {
+        const bindingTest = buildTestForBinding(null, path.get("binding"), argRef);
+        const testWithBindingTest = buildAnd(path.get("test").node, bindingTest)
+        path.get("test").replaceWith(testWithBindingTest);
+
         const bindingDecl = t.variableDeclaration("const", [
           t.variableDeclarator(path.node.binding, argRef)
         ]);
@@ -1128,6 +1255,7 @@ export default function (babel) {
     const stdlib: Stdlib = initializeStdlib(state.opts);
     const useRequire = state.opts.stdlib && state.opts.stdlib.require === true;
     const imports: Imports = {};
+    path.scope.lscRuntimeHelpers = {};
 
     path.traverse({
 
@@ -1451,6 +1579,7 @@ export default function (babel) {
     });
 
     insertStdlibImports(path, imports, useRequire);
+    insertRuntimeHelpers(path);
   }
 
   return {
