@@ -1,8 +1,4 @@
-function _hasLength(arr, minLength, maxLength) {
-  minLength = minLength || 0;
-  maxLength = maxLength != null ? maxLength : Number.MAX_SAFE_INTEGER;
-  return arr != null && typeof arr !== "function" && arr.length === arr.length | 0 && arr.length >= minLength && arr.length <= maxLength;
-}
+function _hasLength(arr, minLength, maxLength) { minLength = minLength || 0; maxLength = maxLength != null ? maxLength : Number.MAX_SAFE_INTEGER; return arr != null && typeof arr !== "function" && arr.length === arr.length | 0 && arr.length >= minLength && arr.length <= maxLength; }
 
 if (_hasLength(x, 0, 0)) {
   const [] = x;

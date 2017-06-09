@@ -12,12 +12,14 @@ export const lightscriptImports = {
 };
 
 export const runtimeHelpers = {
-  hasProps: function hasProps(obj, props) {
-    return (
-      obj != null &&
-      (typeof obj === "object" || typeof obj === "function") &&
-      props.filter(prop => prop in obj).length === props.length
-    );
+  hasProps: function hasProps(obj) {
+    if (obj == null) return false;
+    if (typeof obj !== "object" && typeof obj !== "function") return false;
+    let i = arguments.length;
+    while (--i > 0) {
+      if (!(arguments[i] in obj)) return false;
+    }
+    return true;
   },
   hasLength: function hasLength(arr, minLength, maxLength) {
     minLength = minLength || 0;

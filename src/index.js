@@ -684,6 +684,8 @@ export default function (babel) {
       const fnAST = babel.template(fn.toString())({
         [helperName]: uid,
       });
+      fnAST._compact = true;
+      fnAST._generated = true;
       helpers.push(fnAST);
     }
     insertAfterImports(path, helpers);
@@ -850,6 +852,11 @@ export default function (babel) {
     } else if (path.isLiteral() || isUndefined(path) || isSignedNumber(path)) {
       const isEq = t.binaryExpression("===", argRef, path.node);
       path.replaceWith(isEq);
+    } else if (path.isObjectExpression() || path.isArrayExpression()) {
+      throw path.buildCodeFrameError(
+        "LightScript does not yet support matching on object or array literals. " +
+        "To destructure, use `with` (eg; `| with { foo, bar }: foo + bar`)."
+      );
     }
   }
 
@@ -896,7 +903,7 @@ export default function (babel) {
         }
       }
 
-      const isObjCall = t.callExpression(isObjUid, [argRef, t.arrayExpression(propsToCheck)]);
+      const isObjCall = t.callExpression(isObjUid, [argRef, ...propsToCheck]);
       test = buildAnd(test, isObjCall);
 
       for (const [ propName, childPatternPath, defaultObj = null ] of childPatterns) {
