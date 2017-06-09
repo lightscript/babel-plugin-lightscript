@@ -1,19 +1,21 @@
-if (x === 1 || x === 0.1 || x === 0x11 || x === +1 || x === -1) {
+const it = x;
+
+if (it === 1 || it === 0.1 || it === 0x11 || it === +1 || it === -1) {
   it;
-} else if (x === "hi") {
+} else if (it === "hi") {
   it;
-} else if (x === `there ${ 1 + 1 }`) {
+} else if (it === `there ${ 1 + 1 }`) {
   it;
-} else if (/\s+/.test(x)) {
+} else if (/\s+/.test(it)) {
   it;
-} else if (typeof x === "number" || typeof x === "boolean" || typeof x === "string") {
+} else if (typeof it === "number" || typeof it === "boolean" || typeof it === "string") {
   it;
-} else if (x instanceof Array || x instanceof Object || x instanceof Map || x instanceof Foo) {
+} else if (it instanceof Array || it instanceof Object || it instanceof Map || it instanceof Foo) {
   it;
-} else if (x === null || x === undefined) {
+} else if (it === null || it === undefined) {
   it;
 } else if (x || +x) {
   it;
-} else if (!(x === 1) || !x) {
+} else if (!(it === 1) || !x) {
   it;
 }

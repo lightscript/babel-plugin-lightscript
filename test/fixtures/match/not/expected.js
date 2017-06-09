@@ -1,5 +1,7 @@
-if (!(x === 1) || !(typeof x === "number") || !(x === "hi")) {
+const it = x;
+
+if (!(it === 1) || !(typeof it === "number") || !(it === "hi")) {
   it;
-} else if (!x || !1 + 1 || !foo(bar)) {
+} else if (!it || !1 + 1 || !foo(bar)) {
   it;
 }

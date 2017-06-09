@@ -1,7 +1,7 @@
-const z = (_it => {
-  if (_it === 1) {
+const z = (it => {
+  if (it === 1) {
     return "one";
-  } else if (_it === 2) {
+  } else if (it === 2) {
     return "two";
   } else {
     return "idk";

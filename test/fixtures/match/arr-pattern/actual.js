@@ -1,13 +1,13 @@
 match x:
-  | []:
+  | with []:
     "empty"
-  | [ a, b ]:
+  | with [ a, b ]:
     a - b
-  | [ a, b = 2 ]:
+  | with [ a, b = 2 ]:
     a + b - 2
-  | [ a, ...b ]:
+  | with [ a, ...b ]:
     b.concat(a)
-  | [
+  | with [
       [
         b
         d = 'e'

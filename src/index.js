@@ -950,15 +950,21 @@ export default function (babel) {
     return test;
   }
 
+  function containsAliasReference(path, alias) {
+    let containsAlias = false;
+    path.traverse({
+      ReferencedIdentifier(refPath) {
+        if (refPath.node.name === alias.name) {
+          containsAlias = true;
+          refPath.stop();
+        }
+      }
+    });
+    return containsAlias;
+  }
+
   function transformMatchCases(argRef, cases) {
     return cases.reduce((rootIf, path) => {
-
-      // fill in placeholders
-      path.get("test").traverse({
-        PlaceholderExpression(placeholderPath) {
-          placeholderPath.replaceWith(argRef);
-        }
-      });
 
       // add in ===, etc
       transformMatchCaseTest(path.get("test"), argRef);
@@ -1243,9 +1249,6 @@ export default function (babel) {
     // only allowed in MatchCase, so don't alias to Expression
   });
 
-  definePluginType("PlaceholderExpression", {
-    aliases: ["Expression"]
-  });
 
   // traverse as top-level item so as to run before other babel plugins
   // (and avoid traversing any of their output)
@@ -1547,9 +1550,9 @@ export default function (babel) {
       },
 
       MatchExpression(path) {
-        const { discriminant } = path.node;
+        const { discriminant, alias = null } = path.node;
 
-        const argRef = path.scope.generateUidIdentifier("it");
+        const argRef = alias || t.identifier("it");
         const matchBody = transformMatchCases(argRef, path.get("cases"));
 
         const iife = t.callExpression(
@@ -1561,12 +1564,13 @@ export default function (babel) {
 
       MatchStatement(path) {
         const { discriminant } = path.node;
+        const alias = path.node.alias || t.identifier("it");
 
         let argRef;
-        if (t.isIdentifier(discriminant)) {
+        if (t.isIdentifier(discriminant) && !containsAliasReference(path, alias)) {
           argRef = discriminant;
         } else {
-          argRef = path.scope.generateUidIdentifier("it");
+          argRef = alias;
           path.insertBefore(t.variableDeclaration("const", [
             t.variableDeclarator(argRef, discriminant)
           ]));

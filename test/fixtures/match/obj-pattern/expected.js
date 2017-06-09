@@ -28,4 +28,4 @@ if (_hasProps(x, ["a"])) {
   const { a: { b: { c } } = otherObj } = x;
 
   c;
-} //TODO: | { a, ...b }: b
+} //TODO: test `| { a, ...b }: b`

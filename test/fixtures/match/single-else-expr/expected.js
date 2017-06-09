@@ -1,4 +1,4 @@
-const z = (_it => {
+const z = (it => {
   {
     try {} finally {}
     return "idk";
