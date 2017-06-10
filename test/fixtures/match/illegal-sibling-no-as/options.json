@@ -1,0 +1,3 @@
+{
+  "throws": "Cannot re-use `it` binding in the same scope. Try a new shorthand name (eg; `match foo as x:`)."
+}

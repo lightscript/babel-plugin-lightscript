@@ -1009,6 +1009,14 @@ export default function (babel) {
     }, null);
   }
 
+  function prependDeclaration(path, id, init, kind = "const") {
+    path.insertBefore(t.variableDeclaration(kind, [
+      t.variableDeclarator(id, init)
+    ]));
+    const constPath = path.getSibling(path.key - 1);
+    path.scope.registerBinding(kind, constPath);
+  }
+
   // TYPE DEFINITIONS
   definePluginType("ForInArrayStatement", {
     visitor: ["idx", "elem", "array", "body"],
@@ -1578,9 +1586,10 @@ export default function (babel) {
           argRef = discriminant;
         } else {
           argRef = alias;
-          path.insertBefore(t.variableDeclaration("const", [
-            t.variableDeclarator(argRef, discriminant)
-          ]));
+          if (path.scope.hasOwnBinding(argRef.name)) {
+            throw path.buildCodeFrameError("Cannot re-use `it` binding in the same scope. Try a new shorthand name (eg; `match foo as x:`).");
+          }
+          prependDeclaration(path, argRef, discriminant);
         }
 
         const matchBody = transformMatchCases(argRef, path.get("cases"));
