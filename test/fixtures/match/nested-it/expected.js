@@ -3,16 +3,20 @@ function _hasProps(obj) { if (obj == null) return false; if (typeof obj !== "obj
 const it = foo();
 
 if (it === 1) {
-  const it = it;
+  {
+    const it = it;
 
-  if (it === 2) {
-      it;
-    }
+    if (it === 2) {
+        it;
+      }
+  }
 } else if (_hasProps(it, "x")) {
   const { x } = it;
-  const it = x;
+  {
+    const it = x;
 
-  if (it === 2) {
-      it;
-    }
+    if (it === 2) {
+        it;
+      }
+  }
 }

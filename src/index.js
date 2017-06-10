@@ -1009,7 +1009,7 @@ export default function (babel) {
     }, null);
   }
 
-  function prependDeclaration(path, id, init, kind = "const") {
+  function insertDeclarationBefore(path, id, init, kind = "const") {
     path.insertBefore(t.variableDeclaration(kind, [
       t.variableDeclarator(id, init)
     ]));
@@ -1581,19 +1581,23 @@ export default function (babel) {
         const { discriminant } = path.node;
         const alias = path.node.alias || t.identifier("it");
 
-        let argRef;
-        if (t.isIdentifier(discriminant) && !containsAliasReference(path, alias)) {
-          argRef = discriminant;
-        } else {
-          argRef = alias;
-          if (path.scope.hasOwnBinding(argRef.name)) {
-            throw path.buildCodeFrameError("Cannot re-use `it` binding in the same scope. Try a new shorthand name (eg; `match foo as x:`).");
-          }
-          prependDeclaration(path, argRef, discriminant);
-        }
-
+        const argRef = t.isIdentifier(discriminant) && !containsAliasReference(path, alias)
+          ? discriminant
+          : alias;
         const matchBody = transformMatchCases(argRef, path.get("cases"));
+
         path.replaceWith(matchBody);
+
+        // insert eg; `const it = foo()` above the body,
+        // possibly wrapping both in an anonymous block.
+        if (argRef !== discriminant) {
+          if (path.scope.hasBinding(alias.name)) {
+            // wrap in anonymous block
+            path.replaceWith(t.blockStatement([path.node]));
+            path = path.get("body.0");
+          }
+          insertDeclarationBefore(path, argRef, discriminant);
+        }
       },
 
     });
