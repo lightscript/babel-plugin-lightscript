@@ -1,5 +1,5 @@
 async function fn() {
-  const x = (async () => {
+  const x = await (async () => {
     try {
       return await fetch();
     } catch (_err) {
