@@ -630,7 +630,7 @@ export default function (babel) {
           const importIdentifier = t.identifier(specifierName);
 
           const requireCall = t.callExpression(t.identifier("require"), [
-            t.stringLiteral(importPath + '/' + specifierName)
+            t.stringLiteral(importPath + "/" + specifierName)
           ]);
           const requireStmt = t.variableDeclaration("const", [
             t.variableDeclarator(importIdentifier, requireCall),
@@ -645,7 +645,7 @@ export default function (babel) {
           const importSpecifier = t.importDefaultSpecifier(importIdentifier);
           const importDeclaration = t.importDeclaration(
             [importSpecifier],
-            t.stringLiteral(importPath + '/' + specifierName)
+            t.stringLiteral(importPath + "/" + specifierName)
           );
           declarations.push(importDeclaration);
         }
