@@ -195,7 +195,12 @@ export default function (babel) {
       if (!tailPath) continue;
 
       if (tailPath.isExpressionStatement()) {
-        tailPath.replaceWith(getNewNode(tailPath.node.expression, tailPath));
+        const expression = tailPath.node.expression;
+        if (t.isAwaitExpression(expression)) {
+          tailPath.replaceWith(getNewNode(expression.argument), tailPath);
+        } else {
+          tailPath.replaceWith(getNewNode(expression, tailPath));
+        }
       } else if (tailPath.isVariableDeclaration()) {
         // TODO: handle declarations.length > 1
         // TODO: add linting to discourage
@@ -1184,8 +1189,7 @@ export default function (babel) {
         const fn = t.arrowFunctionExpression([], t.blockStatement([tryCatch]), true);
         // TODO: returntype annotation
         const iife = t.callExpression(fn, []);
-        const awaitExpr = t.awaitExpression(iife);
-        path.replaceWith(awaitExpr);
+        path.replaceWith(iife);
       },
 
       SafeMemberExpression(path) {
