@@ -195,12 +195,7 @@ export default function (babel) {
       if (!tailPath) continue;
 
       if (tailPath.isExpressionStatement()) {
-        const expression = tailPath.node.expression;
-        if (t.isAwaitExpression(expression)) {
-          tailPath.replaceWith(getNewNode(expression.argument), tailPath);
-        } else {
-          tailPath.replaceWith(getNewNode(expression, tailPath));
-        }
+        tailPath.replaceWith(getNewNode(tailPath.node.expression, tailPath));
       } else if (tailPath.isVariableDeclaration()) {
         // TODO: handle declarations.length > 1
         // TODO: add linting to discourage
@@ -369,7 +364,13 @@ export default function (babel) {
   // c/p from replaceExpressionWithStatements
 
   function addImplicitReturns(path) {
-    transformTails(path, false, (expr) => t.returnStatement(expr));
+    transformTails(path, false, (expr) => {
+      if (t.isAwaitExpression(expr)) {
+        return t.returnStatement(expr.argument);
+      }
+
+      return t.returnStatement(expr);
+    });
   }
 
   function containsSuperCall(path) {
