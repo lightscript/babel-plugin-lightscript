@@ -364,7 +364,13 @@ export default function (babel) {
   // c/p from replaceExpressionWithStatements
 
   function addImplicitReturns(path) {
-    transformTails(path, false, (expr) => t.returnStatement(expr));
+    transformTails(path, false, (expr) => {
+      if (t.isAwaitExpression(expr)) {
+        return t.returnStatement(expr.argument);
+      }
+
+      return t.returnStatement(expr);
+    });
   }
 
   function containsSuperCall(path) {
@@ -625,7 +631,7 @@ export default function (babel) {
           const importIdentifier = t.identifier(specifierName);
 
           const requireCall = t.callExpression(t.identifier("require"), [
-            t.stringLiteral(importPath + '/' + specifierName)
+            t.stringLiteral(importPath + "/" + specifierName)
           ]);
           const requireStmt = t.variableDeclaration("const", [
             t.variableDeclarator(importIdentifier, requireCall),
@@ -640,7 +646,7 @@ export default function (babel) {
           const importSpecifier = t.importDefaultSpecifier(importIdentifier);
           const importDeclaration = t.importDeclaration(
             [importSpecifier],
-            t.stringLiteral(importPath + '/' + specifierName)
+            t.stringLiteral(importPath + "/" + specifierName)
           );
           declarations.push(importDeclaration);
         }

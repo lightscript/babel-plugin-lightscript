@@ -1,5 +1,5 @@
 async function fn() {
-  return await (async () => {
+  return (async () => {
     try {
       return await fetch();
     } catch (_err) {

@@ -4,6 +4,6 @@ class A {
   }
 
   async f() {
-    return await this;
+    return this;
   }
 }
