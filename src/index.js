@@ -1,5 +1,5 @@
 import { parse } from "babylon-lightscript";
-import { defaultImports, lightscriptImports, lodashImports } from "./stdlib";
+import { defaultImports, lightscriptImports, lodashImports, runtimeHelpers } from "./stdlib";
 
 export default function (babel) {
   const { types: t } = babel;
@@ -255,9 +255,9 @@ export default function (babel) {
     return body;
   }
 
-  function ensureBlockBody(path) {
-    if (!t.isBlockStatement(path.node.body)) {
-      path.get("body").replaceWith(t.blockStatement([path.node.body]));
+  function ensureBlockBody(path, bodyKey = "body") {
+    if (!path.get(bodyKey).isBlockStatement()) {
+      path.get(bodyKey).replaceWith(t.blockStatement([path.node[bodyKey]]));
     }
   }
 
@@ -586,6 +586,15 @@ export default function (babel) {
     }
   }
 
+  function collectRuntimeHelper(path, helperName) {
+    const programScope = path.scope.getProgramParent();
+    const helpers = programScope.lscRuntimeHelpers;
+    if (!helpers[helperName]) {
+      helpers[helperName] = programScope.generateUidIdentifier(helperName);
+    }
+    return helpers[helperName];
+  }
+
   function makeInlineStdlibFn(inlineFnName) {
     const fnId = t.identifier(inlineFnName);
     const aParam = t.identifier("a");
@@ -612,6 +621,16 @@ export default function (babel) {
     return t.functionDeclaration(fnId, [aParam, bParam], t.blockStatement([
       t.returnStatement(t.binaryExpression(op, aParam, bParam)),
     ]));
+  }
+
+  function insertAfterImports(path, nodes) {
+    // insert inline fns before the first statement which isn't an import statement
+    for (const p of path.get("body")) {
+      if (!p.isImportDeclaration()) {
+        p.insertBefore(nodes);
+        break;
+      }
+    }
   }
 
   function insertStdlibImports(path, imports: Imports, useRequire) {
@@ -659,17 +678,26 @@ export default function (babel) {
       for (const inlineFnName of inlines) {
         inlineDeclarations.push(makeInlineStdlibFn(inlineFnName));
       }
-      // insert inline fns before the first statement which isn't an import statement
-      for (const p of path.get("body")) {
-        if (!p.isImportDeclaration()) {
-          p.insertBefore(inlineDeclarations);
-          break;
-        }
-      }
+      insertAfterImports(path, inlineDeclarations);
     }
   }
 
-  function generateForInIterator (path, type: "array" | "object") {
+  function insertRuntimeHelpers(path) {
+    const helpers = [];
+    for (const helperName in path.scope.lscRuntimeHelpers) {
+      const fn = runtimeHelpers[helperName];
+      const uid = path.scope.lscRuntimeHelpers[helperName];
+      const fnAST = babel.template(fn.toString())({
+        [helperName]: uid,
+      });
+      fnAST._compact = true;
+      fnAST._generated = true;
+      helpers.push(fnAST);
+    }
+    insertAfterImports(path, helpers);
+  }
+
+  function generateForInIterator(path, type: "array" | "object") {
     const idx = path.node.idx || path.scope.generateUidIdentifier("i");
     const len = path.scope.generateUidIdentifier("len");
 
@@ -762,6 +790,237 @@ export default function (babel) {
     }
 
     return t.forStatement(init, test, update, path.node.body);
+  }
+
+  function addAlternateToIfChain(rootIf, alternate) {
+    let tail = rootIf
+    while (tail.alternate) tail = tail.alternate;
+    tail.alternate = alternate;
+    return rootIf;
+  }
+
+  function isUndefined(path) {
+    return path.isIdentifier() && path.node.name === "undefined";
+  }
+
+  function isSignedNumber(path) {
+    return path.isUnaryExpression() &&
+      path.get("argument").isNumericLiteral() &&
+      (path.node.operator === "+" || path.node.operator === "-");
+  }
+
+  function looksLikeClassName(path) {
+    // disallow Foo.Bar for now.
+    if (!path.isIdentifier()) return false;
+    const { name } = path.node;
+    if (name[0].toUpperCase() === name[0]) {
+      // A -> true
+      if (name.length === 1) return true;
+      // ABC -> false, it's a constant
+      if (name.toUpperCase() === name) return false;
+      // Abc -> true
+      return true;
+    }
+    return false;
+  }
+
+  function isPrimitiveClass({ node: { name }}) {
+    switch (name) {
+      case "Number":
+      case "String":
+      case "Boolean":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function transformMatchCaseTest(path, argRef) {
+    if (path.isLogicalExpression()) {
+      transformMatchCaseTest(path.get("left"), argRef);
+      transformMatchCaseTest(path.get("right"), argRef);
+    } else if (path.isUnaryExpression() && path.node.operator === "!") {
+      transformMatchCaseTest(path.get("argument"), argRef);
+    } else if (path.isRegExpLiteral()) {
+      const testCall = t.callExpression(
+        t.memberExpression(path.node, t.identifier("test")),
+        [argRef]
+      );
+      path.replaceWith(testCall);
+    } else if (looksLikeClassName(path)) {
+      const classInstanceCheck = isPrimitiveClass(path)
+        ? t.binaryExpression("===",
+            t.unaryExpression("typeof", argRef),
+            t.stringLiteral(path.node.name.toLowerCase())
+          )
+        : t.binaryExpression("instanceof", argRef, path.node)
+      path.replaceWith(classInstanceCheck);
+    } else if (path.isLiteral() || isUndefined(path) || isSignedNumber(path)) {
+      const isEq = t.binaryExpression("===", argRef, path.node);
+      path.replaceWith(isEq);
+    } else if (path.isObjectExpression() || path.isArrayExpression()) {
+      throw path.buildCodeFrameError(
+        "LightScript does not yet support matching on object or array literals. " +
+        "To destructure, use `with` (eg; `| with { foo, bar }: foo + bar`)."
+      );
+    }
+  }
+
+  function extendAndChain(andChainPath, condition) {
+    if (!andChainPath.node) {
+      andChainPath.replaceWith(condition);
+    } else {
+      andChainPath.replaceWith(t.logicalExpression("&&", andChainPath.node, condition));
+    }
+  }
+
+  function buildAnd(left, right) {
+    if (left && right) {
+      return t.logicalExpression("&&", left, right);
+    } else if (left) {
+      return left;
+    } else if (right) {
+      return right;
+    } else {
+      return t.booleanLiteral(true);
+    }
+  }
+
+  function buildTestForBinding(test, bindingPath, argRef) {
+    if (bindingPath.isObjectPattern()) {
+      const isObjUid = collectRuntimeHelper(bindingPath, "hasProps");
+
+      const propsToCheck = [];
+      const childPatterns = [];  // list of [propName, path] tuples
+      for (const propPath of bindingPath.get("properties")) {
+        const propName = propPath.get("key").node.name;
+
+        if (propPath.get("value").isAssignmentPattern()) {
+          if (propPath.get("value.left").isPattern()) {
+            childPatterns.push([propName, propPath.get("value.left"), propPath.get("value.right").node]);
+          }
+        } else {
+          const propStr = t.stringLiteral(propName);
+          propsToCheck.push(propStr);
+
+          if (propPath.get("value").isPattern()) {
+            childPatterns.push([propName, propPath.get("value")]);
+          }
+        }
+      }
+
+      const isObjCall = t.callExpression(isObjUid, [argRef, ...propsToCheck]);
+      test = buildAnd(test, isObjCall);
+
+      for (const [ propName, childPatternPath, defaultObj = null ] of childPatterns) {
+        const propertyArgRef = t.memberExpression(argRef, t.identifier(propName));
+
+        if (defaultObj) {
+          test = buildAnd(test, t.logicalExpression("||",
+            buildTestForBinding(null, childPatternPath, propertyArgRef),
+            buildTestForBinding(null, childPatternPath, defaultObj)
+          ));
+        } else {
+          test = buildTestForBinding(test, childPatternPath, propertyArgRef);
+        }
+      }
+    } else if (bindingPath.isArrayPattern()) {
+      const hasLengthUid = collectRuntimeHelper(bindingPath, "hasLength");
+
+      const childPatterns = []; // list of [index, path] tuples.
+      let minLength = 0;
+      let maxLength = 0;
+      bindingPath.get("elements").forEach((elemPath, i) => {
+        if (elemPath.isAssignmentPattern()) {
+          ++maxLength;
+          if (elemPath.get("left").isPattern()) {
+            childPatterns.push([i, elemPath.get("left")]);
+          }
+        } else if (elemPath.isRestElement()) {
+          maxLength = null;
+        } else {
+          ++minLength;
+          ++maxLength;
+          if (elemPath.isPattern()) {
+            childPatterns.push([i, elemPath]);
+          }
+        }
+      });
+
+      const hasLengthCall = t.callExpression(hasLengthUid, [
+        argRef,
+        t.numericLiteral(minLength),
+        maxLength === null ? null : t.numericLiteral(maxLength)
+      ].filter(x => x !== null));
+      test = buildAnd(test, hasLengthCall);
+
+      for (const [index, childPatternPath] of childPatterns) {
+        const elementArgRef = t.memberExpression(argRef, t.numericLiteral(index), true);
+        test = buildTestForBinding(test, childPatternPath, elementArgRef);
+      }
+    } else throw new TypeError(`Expected Pattern, got ${bindingPath.node.type}`);
+
+    return test;
+  }
+
+  function containsAliasReference(path, alias) {
+    let containsAlias = false;
+    path.traverse({
+      ReferencedIdentifier(refPath) {
+        if (refPath.node.name === alias.name) {
+          containsAlias = true;
+          refPath.stop();
+        }
+      }
+    });
+    return containsAlias;
+  }
+
+  function transformMatchCases(argRef, cases) {
+    return cases.reduce((rootIf, path) => {
+
+      // add in ===, etc
+      transformMatchCaseTest(path.get("test"), argRef);
+
+      // add binding (and always use block bodies)
+      ensureBlockBody(path, "consequent");
+      if (path.node.binding) {
+        const bindingTest = buildTestForBinding(null, path.get("binding"), argRef);
+        const testWithBindingTest = buildAnd(path.get("test").node, bindingTest)
+        path.get("test").replaceWith(testWithBindingTest);
+
+        const bindingDecl = t.variableDeclaration("const", [
+          t.variableDeclarator(path.node.binding, argRef)
+        ]);
+        path.get("consequent").unshiftContainer("body", bindingDecl);
+      }
+
+      // handle `else`
+      if (path.node.test.type === "MatchElse") {
+        if (rootIf) {
+          return addAlternateToIfChain(rootIf, path.node.consequent);
+        } else {
+          // single match case with "else", weird. Just generate an anonymous block for now.
+          return path.node.consequent;
+        }
+      }
+
+      // generate `if` and append to if-else chain
+      const ifStmt = t.ifStatement(path.node.test, path.node.consequent);
+      if (!rootIf) {
+        return ifStmt;
+      } else {
+        return addAlternateToIfChain(rootIf, ifStmt);
+      }
+    }, null);
+  }
+
+  function insertDeclarationBefore(path, id, init, kind = "const") {
+    path.insertBefore(t.variableDeclaration(kind, [
+      t.variableDeclarator(id, init)
+    ]));
+    const constPath = path.getSibling(path.key - 1);
+    path.scope.registerBinding(kind, constPath);
   }
 
   // TYPE DEFINITIONS
@@ -966,6 +1225,52 @@ export default function (babel) {
     aliases: ["MemberExpression", "Expression", "LVal"],
   });
 
+  definePluginType("MatchExpression", {
+    builder: ["discriminant", "cases"],
+    visitor: ["discriminant", "cases"],
+    aliases: ["Expression", "Conditional"],
+    fields: {
+      discriminant: {
+        validate: assertNodeType("Expression")
+      },
+      cases: {
+        validate: chain(assertValueType("array"), assertEach(assertNodeType("MatchCase")))
+      }
+    }
+  });
+
+  definePluginType("MatchStatement", {
+    builder: ["discriminant", "cases"],
+    visitor: ["discriminant", "cases"],
+    aliases: ["Statement", "Conditional"],
+    fields: {
+      discriminant: {
+        validate: assertNodeType("Expression")
+      },
+      cases: {
+        validate: chain(assertValueType("array"), assertEach(assertNodeType("MatchCase")))
+      }
+    }
+  });
+
+  definePluginType("MatchCase", {
+    builder: ["test", "consequent", "functional"],
+    visitor: ["test", "consequent"],
+    fields: {
+      test: {
+        validate: assertNodeType("Expression", "MatchElse")
+      },
+      consequent: {
+        validate: assertNodeType("BlockStatement", "ExpressionStatement")
+      }
+    }
+  });
+
+  definePluginType("MatchElse", {
+    // only allowed in MatchCase, so don't alias to Expression
+  });
+
+
   // traverse as top-level item so as to run before other babel plugins
   // (and avoid traversing any of their output)
   function Program(path, state) {
@@ -974,6 +1279,7 @@ export default function (babel) {
     const stdlib: Stdlib = initializeStdlib(state.opts);
     const useRequire = state.opts.stdlib && state.opts.stdlib.require === true;
     const imports: Imports = {};
+    path.scope.lscRuntimeHelpers = {};
 
     path.traverse({
 
@@ -1264,10 +1570,46 @@ export default function (babel) {
         }
       },
 
+      MatchExpression(path) {
+        const { discriminant, alias = null } = path.node;
+
+        const argRef = alias || t.identifier("it");
+        const matchBody = transformMatchCases(argRef, path.get("cases"));
+
+        const iife = t.callExpression(
+          t.arrowFunctionExpression([argRef], t.blockStatement([matchBody])),
+          [discriminant]
+        );
+        path.replaceWith(iife);
+      },
+
+      MatchStatement(path) {
+        const { discriminant } = path.node;
+        const alias = path.node.alias || t.identifier("it");
+
+        const argRef = t.isIdentifier(discriminant) && !containsAliasReference(path, alias)
+          ? discriminant
+          : alias;
+        const matchBody = transformMatchCases(argRef, path.get("cases"));
+
+        path.replaceWith(matchBody);
+
+        // insert eg; `const it = foo()` above the body,
+        // possibly wrapping both in an anonymous block.
+        if (argRef !== discriminant) {
+          if (path.scope.hasBinding(alias.name)) {
+            // wrap in anonymous block
+            path.replaceWith(t.blockStatement([path.node]));
+            path = path.get("body.0");
+          }
+          insertDeclarationBefore(path, argRef, discriminant);
+        }
+      },
 
     });
 
     insertStdlibImports(path, imports, useRequire);
+    insertRuntimeHelpers(path);
   }
 
   return {

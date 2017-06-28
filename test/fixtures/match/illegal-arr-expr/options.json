@@ -1,0 +1,3 @@
+{
+  "throws": "LightScript does not yet support matching on object or array literals. To destructure, use `with` (eg; `| with { foo, bar }: foo + bar`)."
+}

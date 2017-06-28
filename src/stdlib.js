@@ -11,6 +11,29 @@ export const lightscriptImports = {
   "bitwiseZeroFillRightShift": "inline",
 };
 
+export const runtimeHelpers = {
+  hasProps: function hasProps(obj) {
+    if (obj == null) return false;
+    if (typeof obj !== "object" && typeof obj !== "function") return false;
+    let i = arguments.length;
+    while (--i > 0) {
+      if (!(arguments[i] in obj)) return false;
+    }
+    return true;
+  },
+  hasLength: function hasLength(arr, minLength, maxLength) {
+    minLength = minLength || 0;
+    maxLength = maxLength != null ? maxLength : Number.MAX_SAFE_INTEGER;
+    return (
+      arr != null &&
+      typeof arr !== "function" &&
+      arr.length === arr.length|0 &&
+      arr.length >= minLength &&
+      arr.length <= maxLength
+    );
+  },
+};
+
 export const everyLodashMethod = [
   "add",
   "after",
